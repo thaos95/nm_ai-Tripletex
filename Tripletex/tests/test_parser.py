@@ -33,3 +33,14 @@ def test_parse_delete_travel_expense_prompt() -> None:
     parsed = parse_prompt("Slett reiseregning 42")
     assert parsed.task_type == TaskType.DELETE_TRAVEL_EXPENSE
     assert parsed.fields["travel_expense_id"] == 42
+
+
+def test_parse_create_project_with_customer_and_org_number() -> None:
+    parsed = parse_prompt(
+        'Create the project "Analysis Oakwood" linked to the customer Oakwood Ltd (org no. 849612913). The project manager is Lucy Taylor (lucy.taylor@example.org).'
+    )
+    assert parsed.task_type == TaskType.CREATE_PROJECT
+    assert parsed.fields["name"] == "Analysis Oakwood"
+    assert parsed.related_entities["customer"]["name"] == "Oakwood Ltd"
+    assert parsed.related_entities["customer"]["organizationNumber"] == "849612913"
+    assert "phone" not in parsed.fields

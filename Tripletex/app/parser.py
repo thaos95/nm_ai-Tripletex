@@ -6,7 +6,9 @@ from app.schemas import ParsedTask, TaskType
 
 
 EMAIL_RE = re.compile(r"[\w.\-+]+@[\w.\-]+\.\w+")
-PHONE_RE = re.compile(r"(?:\+\d{1,3}\s?)?(?:\d[\s-]?){8,15}\d")
+PHONE_RE = re.compile(
+    r"((?:\+\d{1,3}\s?)?(?:\d[\s-]?){8,15}\d)"
+)
 NUMBER_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
@@ -92,7 +94,7 @@ def _first_match(regex: re.Pattern, text: str) -> Optional[str]:
 
 
 def _clean_name(value: str) -> str:
-    for marker in [" med ", " with ", " som ", " for ", ",", "."]:
+    for marker in [" (org no", " (org.nr", " med ", " with ", " som ", " for ", " linked to ", " knyttet til ", ",", "."]:
         if marker in value:
             value = value.split(marker, 1)[0]
     return value.strip(" .,:;")
@@ -136,12 +138,14 @@ def _extract_amount(prompt: str) -> Optional[float]:
 def _extract_common_fields(prompt: str) -> Dict[str, object]:
     fields = {}
     email = _first_match(EMAIL_RE, prompt)
-    phone = _first_match(PHONE_RE, prompt)
     date = _first_match(DATE_RE, prompt)
+    phone_match = None
+    if any(keyword in prompt.lower() for keyword in ["telefon", "phone", "mobil", "mobile"]):
+        phone_match = PHONE_RE.search(prompt)
     if email:
         fields["email"] = email
-    if phone:
-        fields["phone"] = phone.replace(" ", "")
+    if phone_match:
+        fields["phone"] = phone_match.group(1).replace(" ", "")
     if date:
         fields["date"] = date
     return fields
@@ -158,6 +162,13 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     return related_entities
 
 
+def _extract_org_number(prompt: str) -> Optional[str]:
+    match = re.search(r"(?:org(?:anization)?\s*no\.?|orgnr\.?|org\.nr\.?)\s*(\d{9})", prompt, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
 def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     lowered = prompt.lower()
     action = _detect_action(lowered)
@@ -166,6 +177,9 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     related_entities = {}
     match_fields = {}
     notes = []
+
+    if "project" in lowered or "prosjekt" in lowered:
+        entity = "project"
 
     if entity == "employee" and action == "create":
         first_name, last_name = _split_person_name(_extract_named_entity(prompt, ["navn"]))
@@ -244,6 +258,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
         if customer_name:
             related_entities["customer"] = {"name": customer_name, "isCustomer": True}
+            org_number = _extract_org_number(prompt)
+            if org_number:
+                related_entities["customer"]["organizationNumber"] = org_number
+        manager_name = _extract_named_entity(prompt, ["project manager", "prosjektleder"])
+        if manager_name:
+            fields["projectManagerName"] = manager_name
         return ParsedTask(
             task_type=TaskType.CREATE_PROJECT,
             confidence=0.81,
