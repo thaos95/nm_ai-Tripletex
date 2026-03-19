@@ -19,9 +19,9 @@ TASK_SCHEMA = {
         "task_type": {"type": "string", "enum": TASK_TYPES},
         "confidence": {"type": "number"},
         "language_hint": {"type": "string"},
-        "fields": {"type": "object", "additionalProperties": True},
-        "match_fields": {"type": "object", "additionalProperties": True},
-        "related_entities": {"type": "object", "additionalProperties": True},
+        "fields_json": {"type": "string"},
+        "match_fields_json": {"type": "string"},
+        "related_entities_json": {"type": "string"},
         "attachments_required": {"type": "boolean"},
         "notes": {"type": "array", "items": {"type": "string"}},
     },
@@ -29,9 +29,9 @@ TASK_SCHEMA = {
         "task_type",
         "confidence",
         "language_hint",
-        "fields",
-        "match_fields",
-        "related_entities",
+        "fields_json",
+        "match_fields_json",
+        "related_entities_json",
         "attachments_required",
         "notes",
     ],
@@ -68,6 +68,10 @@ For related_entities, use nested objects like:
   "customer": {"name": "Acme AS", "email": "x@example.org", "isCustomer": true},
   "product": {"name": "Consulting", "priceExcludingVatCurrency": 1500}
 }
+Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-encoded strings, for example:
+- fields_json = "{\"name\":\"Acme AS\",\"isCustomer\":true}"
+- match_fields_json = "{}"
+- related_entities_json = "{\"customer\":{\"name\":\"Acme AS\",\"isCustomer\":true}}"
 """
 
 
@@ -129,9 +133,9 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
             task_type=TaskType(parsed["task_type"]),
             confidence=float(parsed["confidence"]),
             language_hint=str(parsed["language_hint"]),
-            fields=dict(parsed["fields"]),
-            match_fields=dict(parsed["match_fields"]),
-            related_entities=dict(parsed["related_entities"]),
+            fields=dict(json.loads(parsed["fields_json"])),
+            match_fields=dict(json.loads(parsed["match_fields_json"])),
+            related_entities=dict(json.loads(parsed["related_entities_json"])),
             attachments_required=bool(parsed["attachments_required"]),
             notes=list(parsed["notes"]),
         )
