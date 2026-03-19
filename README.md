@@ -14,9 +14,9 @@ Prosjektet har ingen eksterne avhengigheter enda, men du kan fortsatt bruke:
 pip install -r requirements.txt
 ```
 
-## Kjøre prosjektet
+## Kjore prosjektet
 
-Kjør prosjektet fra prosjektmappen:
+Kjor prosjektet fra prosjektmappen:
 
 ```bash
 python main.py
