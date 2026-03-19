@@ -4,7 +4,10 @@ from typing import Any, Dict, Optional
 import httpx
 
 from app.config import settings
+from app.logging_utils import get_logger
 from app.schemas import ParsedTask, TaskType
+
+logger = get_logger("tripletex-agent.llm")
 
 
 TASK_TYPES = [task.value for task in TaskType]
@@ -101,7 +104,14 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
             timeout=25.0,
             trust_env=False,
         )
-        response.raise_for_status()
+        if response.is_error:
+            logger.error(
+                "openai_parse_failed status=%s body=%r payload_model=%s",
+                response.status_code,
+                response.text[:4000],
+                settings.openai_model,
+            )
+            return None
         data = response.json()
         output_text = data.get("output_text")
         if not output_text:
@@ -126,4 +136,5 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
             notes=list(parsed["notes"]),
         )
     except Exception:
+        logger.exception("openai_parse_exception model=%s", settings.openai_model)
         return None
