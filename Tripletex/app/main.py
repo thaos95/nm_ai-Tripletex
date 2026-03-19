@@ -60,10 +60,14 @@ def solve(
     plan = build_plan(parsed_task)
 
     logger.info(
-        "solve_start task_type=%s language=%s attachments=%s",
+        "solve_start task_type=%s language=%s attachments=%s prompt=%r parsed_fields=%r match_fields=%r related=%r",
         parsed_task.task_type,
         parsed_task.language_hint,
         len(decoded_files),
+        request.prompt[:500],
+        parsed_task.fields,
+        parsed_task.match_fields,
+        parsed_task.related_entities,
     )
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
@@ -73,6 +77,7 @@ def solve(
     try:
         result = execute_plan(client, plan)
     except TripletexClientError as exc:
+        logger.exception("solve_failed task_type=%s prompt=%r", parsed_task.task_type, request.prompt[:500])
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     finally:
         client.close()

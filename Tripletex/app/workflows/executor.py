@@ -156,7 +156,11 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="create-project", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_DEPARTMENT:
-        response = client.create_resource("department", _compact_payload(fields))
+        payload = {
+            "name": fields.get("name"),
+            "departmentNumber": fields.get("departmentNumber"),
+        }
+        response = client.create_resource("department", _compact_payload(payload))
         operations.append(
             OperationResult(name="create-department", resource_id=_extract_id(response), payload=response)
         )
