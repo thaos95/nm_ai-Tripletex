@@ -1,5 +1,6 @@
 from app.parser import parse_prompt
 from app.schemas import TaskType
+from app.validator import validate_and_normalize_task
 
 
 def test_parse_create_employee_prompt() -> None:
@@ -59,3 +60,10 @@ def test_parse_search_customers_prompt() -> None:
     parsed = parse_prompt("Finn alle kunder med orgnr 849612913")
     assert parsed.task_type == TaskType.SEARCH_CUSTOMERS
     assert parsed.match_fields["organizationNumber"] == "849612913"
+
+
+def test_validator_drops_invalid_customer_org_number() -> None:
+    parsed = parse_prompt("Creer client Client Bleu 12345 SARL, client.bleu@example.org")
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_CUSTOMER
+    assert "organizationNumber" not in validated.parsed_task.fields

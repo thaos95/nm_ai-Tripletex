@@ -40,7 +40,11 @@ def build_test_cases() -> List[TestCase]:
             "Opprett en ansatt med navn {0}, {1}.".format(employee_full_name, employee_email),
             [],
         ),
-        TestCase("update_employee_no", "Oppdater ansatt {0} med telefon +47 41234567".format(employee_full_name), []),
+        TestCase(
+            "update_employee_no",
+            "Oppdater ansatt {0} med e-post {1} og telefon +47 41234567".format(employee_full_name, employee_email),
+            [],
+        ),
         TestCase("create_product_no", "Opprett produkt {0} 2500".format(product_name), []),
         TestCase("create_department_no", "Opprett avdeling Strategi {0}".format(department_number), []),
         TestCase("create_project_no", "Opprett prosjekt {0} for kunde {1}".format(project_name, customer_name), []),

@@ -59,6 +59,17 @@ def _normalize_travel_expense(task: ParsedTask) -> None:
         task.fields["amount"] = float(task.fields["amount"])
 
 
+def _normalize_customer_fields(task: ParsedTask) -> None:
+    organization_number = task.fields.get("organizationNumber")
+    if organization_number is None:
+        return
+    digits_only = "".join(ch for ch in str(organization_number) if ch.isdigit())
+    if len(digits_only) == 9:
+        task.fields["organizationNumber"] = digits_only
+    else:
+        task.fields.pop("organizationNumber", None)
+
+
 def _drop_unknown_fields(task: ParsedTask, allowed_fields: Dict[TaskType, Set[str]]) -> List[str]:
     warnings: List[str] = []
     allowed = allowed_fields.get(task.task_type)
@@ -80,6 +91,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         _normalize_phone_fields(normalized)
     elif normalized.task_type == TaskType.UPDATE_CUSTOMER:
         _normalize_customer_phone(normalized)
+    elif normalized.task_type == TaskType.CREATE_CUSTOMER:
+        _normalize_customer_fields(normalized)
     elif normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         _normalize_travel_expense(normalized)
 
@@ -95,7 +108,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber"},
         TaskType.CREATE_ORDER: {"orderDate", "deliveryDate"},
         TaskType.CREATE_INVOICE: {"invoiceDate", "invoiceDueDate", "amount"},
-        TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "description", "distance"},
+        TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "distance"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
         TaskType.DELETE_VOUCHER: {"voucher_id"},
         TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
