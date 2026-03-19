@@ -103,3 +103,11 @@ class TripletexClient:
         if len(values) == 1:
             return values[0]
         return None
+
+    def find_by_id(self, resource: str, resource_id: int, fields: str = "*") -> Optional[Dict[str, Any]]:
+        response = self._request("GET", "/{0}/{1}".format(resource.strip("/"), resource_id), params={"fields": fields})
+        if "value" in response and isinstance(response["value"], dict):
+            return response["value"]
+        if response:
+            return response
+        return None

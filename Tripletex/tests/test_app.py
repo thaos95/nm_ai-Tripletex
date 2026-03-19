@@ -46,6 +46,12 @@ def mock_transport() -> httpx.MockTransport:
         if request.method == "POST" and request.url.path == "/v2/invoice":
             return httpx.Response(200, json={"value": {"id": 6001}})
 
+        if request.method == "GET" and request.url.path == "/v2/ledger/voucher/7":
+            return httpx.Response(200, json={"value": {"id": 7}})
+
+        if request.method == "DELETE" and request.url.path == "/v2/ledger/voucher/7":
+            return httpx.Response(200, json={})
+
         if request.method == "GET" and request.url.path == "/v2/travelExpense":
             return httpx.Response(200, json={"values": [{"id": 42}]})
 
@@ -74,8 +80,7 @@ def test_solve_create_employee() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
-    assert response.json()["task_type"] == "create_employee"
-    assert response.json()["operations"] == 2
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
 
 
@@ -95,8 +100,7 @@ def test_solve_update_customer() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["task_type"] == "update_customer"
-    assert response.json()["operations"] == 1
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
 
 
@@ -116,8 +120,7 @@ def test_solve_create_invoice_with_prerequisites() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["task_type"] == "create_invoice"
-    assert response.json()["operations"] >= 3
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
 
 
@@ -143,6 +146,25 @@ def test_solve_with_attachment_and_delete_travel_expense() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["task_type"] == "delete_travel_expense"
-    assert response.json()["operations"] == 1
+    assert response.json() == {"status": "completed"}
+    app.dependency_overrides.clear()
+
+
+def test_solve_delete_voucher() -> None:
+    app.dependency_overrides[get_client_transport] = mock_transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Slett bilag 7",
+            "files": [],
+            "tripletex_credentials": {
+                "base_url": "https://tx-proxy.ainm.no/v2",
+                "session_token": "token",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()

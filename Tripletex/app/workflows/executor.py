@@ -183,6 +183,8 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             raise TripletexClientError("Invoice requires resolvable customer")
         product_id = _resolve_product(client, product_spec, operations)
         order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
+        # Tripletex sandbox may reject invoice creation until company bank settings exist.
+        # Keep the flow narrow and deterministic; rely on logged 422 details if this task appears.
         invoice_payload = {
             "invoiceDate": fields.get("invoiceDate"),
             "invoiceDueDate": fields.get("invoiceDueDate"),
@@ -214,6 +216,8 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         voucher_id = fields.get("voucher_id")
         if voucher_id is None:
             raise TripletexClientError("Voucher deletion requires voucher id")
+        voucher = client.find_by_id("ledger/voucher", int(voucher_id))
+        operations.append(OperationResult(name="lookup-voucher", resource_id=int(voucher_id), payload=voucher))
         client.delete_resource("ledger/voucher", int(voucher_id))
         operations.append(OperationResult(name="delete-voucher", resource_id=int(voucher_id)))
 

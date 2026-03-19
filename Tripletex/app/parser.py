@@ -255,8 +255,9 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if entity == "department" and action == "create":
         department_name = _extract_named_entity(prompt, ["avdeling", "department", "departamento", "abteilung"])
         fields["name"] = department_name or "Unknown Department"
-        if "regnskap" in lowered or "accounting" in lowered:
-            fields["hasAccounting"] = True
+        number = _extract_amount(prompt)
+        if number is not None and number.is_integer():
+            fields["departmentNumber"] = str(int(number))
         return ParsedTask(
             task_type=TaskType.CREATE_DEPARTMENT,
             confidence=0.8,
@@ -281,6 +282,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             fields["amount"] = amount
         if "date" in fields:
             fields["expenseDate"] = fields.pop("date")
+        if "kilometer" in lowered or "km" in lowered:
+            fields["distance"] = int(amount) if amount is not None else 0
         return ParsedTask(
             task_type=TaskType.CREATE_TRAVEL_EXPENSE,
             confidence=0.72,

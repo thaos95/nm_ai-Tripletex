@@ -42,8 +42,6 @@ class SolveRequest(BaseModel):
 
 class SolveResponse(BaseModel):
     status: str = "completed"
-    task_type: TaskType
-    operations: int
 
 
 class ParsedTask(BaseModel):

@@ -3,7 +3,7 @@ from typing import Dict, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
-from app.attachments.service import decode_files, extract_attachment_text
+from app.attachments.service import decode_files, describe_attachments, extract_attachment_text
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.config import settings
 from app.logging_utils import get_logger
@@ -52,9 +52,12 @@ def solve(
 ) -> SolveResponse:
     decoded_files = decode_files(request.files)
     attachment_text = extract_attachment_text(decoded_files)
+    attachment_description = describe_attachments(decoded_files)
     parsing_input = request.prompt
+    if attachment_description:
+        parsing_input = "{0}\n\nAttachment metadata:\n{1}".format(parsing_input, attachment_description)
     if attachment_text:
-        parsing_input = "{0}\n\nAttachment text:\n{1}".format(request.prompt, attachment_text)
+        parsing_input = "{0}\n\nAttachment text:\n{1}".format(parsing_input, attachment_text)
 
     parsed_task = parse_prompt(parsing_input)
     plan = build_plan(parsed_task)
@@ -71,7 +74,7 @@ def solve(
     )
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
-        return SolveResponse(task_type=parsed_task.task_type, operations=0)
+        return SolveResponse()
 
     client = get_tripletex_client(request, transport)
     try:
@@ -82,4 +85,9 @@ def solve(
     finally:
         client.close()
 
-    return SolveResponse(task_type=result.task_type, operations=len(result.operations))
+    logger.info(
+        "solve_completed task_type=%s operations=%s",
+        result.task_type,
+        len(result.operations),
+    )
+    return SolveResponse()

@@ -28,3 +28,15 @@ def extract_attachment_text(decoded_files: List[Dict[str, Union[str, bytes]]]) -
             except UnicodeDecodeError:
                 chunks.append(content.decode("latin-1", errors="ignore"))
     return "\n".join(chunk.strip() for chunk in chunks if chunk.strip())
+
+
+def describe_attachments(decoded_files: List[Dict[str, Union[str, bytes]]]) -> str:
+    lines = []
+    for file in decoded_files:
+        lines.append(
+            "filename={0}, mime_type={1}".format(
+                str(file["filename"]),
+                str(file["mime_type"]),
+            )
+        )
+    return "\n".join(lines)
