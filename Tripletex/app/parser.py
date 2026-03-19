@@ -266,6 +266,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if entity == "project" and action == "create":
         project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projekt"])
         fields["name"] = project_name or "Unknown Project"
+        fields["startDate"] = fields.get("date") or "2026-03-19"
         customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
         if customer_name:
             related_entities["customer"] = {"name": customer_name, "isCustomer": True}

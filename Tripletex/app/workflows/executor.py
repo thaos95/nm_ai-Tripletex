@@ -30,6 +30,8 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
     payload = {"name": spec.get("name", "Unknown Customer"), "isCustomer": True}
     if spec.get("email"):
         payload["email"] = spec["email"]
+    if spec.get("organizationNumber"):
+        payload["organizationNumber"] = spec["organizationNumber"]
     response = client.create_resource("customer", _compact_payload(payload))
     customer_id = _extract_id(response)
     operations.append(OperationResult(name="create-customer", resource_id=customer_id, payload=response))
@@ -64,6 +66,18 @@ def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations:
     employee_id = _extract_id(response)
     operations.append(OperationResult(name="create-employee", resource_id=employee_id, payload=response))
     return employee_id
+
+
+def _resolve_fallback_project_manager(client: TripletexClient, operations: list) -> Optional[int]:
+    employees = client.list_resource("employee", fields="id,firstName,lastName,employments,*", count=20)
+    for employee in employees.get("values", []):
+        if employee.get("employments"):
+            employee_id = employee["id"]
+            operations.append(
+                OperationResult(name="fallback-project-manager", resource_id=employee_id, payload=employee)
+            )
+            return employee_id
+    return None
 
 
 def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
@@ -176,7 +190,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="create-product", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_PROJECT:
-        payload = {"name": fields.get("name")}
+        payload = {
+            "name": fields.get("name"),
+            "startDate": fields.get("startDate") or "2026-03-19",
+        }
         customer_spec = related.get("customer")
         if customer_spec:
             customer_id = _resolve_customer(client, customer_spec, operations)
@@ -187,7 +204,16 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             manager_id = _resolve_employee(client, manager_spec, operations)
             if manager_id is not None:
                 payload["projectManager"] = {"id": manager_id}
-        response = client.create_resource("project", _compact_payload(payload))
+        try:
+            response = client.create_resource("project", _compact_payload(payload))
+        except TripletexClientError as exc:
+            if "prosjektleder" not in str(exc).lower():
+                raise
+            fallback_manager_id = _resolve_fallback_project_manager(client, operations)
+            if fallback_manager_id is None:
+                raise
+            payload["projectManager"] = {"id": fallback_manager_id}
+            response = client.create_resource("project", _compact_payload(payload))
         operations.append(OperationResult(name="create-project", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_DEPARTMENT:
