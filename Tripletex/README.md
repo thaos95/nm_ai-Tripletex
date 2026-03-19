@@ -81,3 +81,14 @@ Submit denne URL-en til konkurransen:
 ```text
 https://YOUR_CLOUD_RUN_URL/solve
 ```
+
+## Optional LLM Parser
+
+Regel-parseren fungerer uten ekstern modell, men du kan gi agenten bredere task-forstaelse ved aa sette:
+
+```text
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5-mini
+```
+
+Da prover agenten en strukturert OpenAI-parser forst og faller tilbake til regel-parseren hvis LLM-kallet feiler eller mangler nokkel.

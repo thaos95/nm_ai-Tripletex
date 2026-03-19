@@ -1,6 +1,7 @@
 import re
 from typing import Dict, List, Optional, Tuple
 
+from app.llm_parser import parse_prompt_with_llm
 from app.schemas import ParsedTask, TaskType
 
 
@@ -157,7 +158,7 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     return related_entities
 
 
-def parse_prompt(prompt: str) -> ParsedTask:
+def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     lowered = prompt.lower()
     action = _detect_action(lowered)
     entity = _detect_entity(lowered)
@@ -336,3 +337,10 @@ def parse_prompt(prompt: str) -> ParsedTask:
         fields=fields,
         notes=["No supported workflow matched prompt."],
     )
+
+
+def parse_prompt(prompt: str) -> ParsedTask:
+    llm_parsed = parse_prompt_with_llm(prompt)
+    if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
+        return llm_parsed
+    return parse_prompt_rule_based(prompt)
