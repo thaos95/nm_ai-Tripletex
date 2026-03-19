@@ -256,7 +256,12 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="create-invoice", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
-        response = client.create_resource("travelExpense", _compact_payload(fields))
+        payload = dict(fields)
+        if "employee" not in payload:
+            fallback_employee_id = _resolve_fallback_project_manager(client, operations)
+            if fallback_employee_id is not None:
+                payload["employee"] = {"id": fallback_employee_id}
+        response = client.create_resource("travelExpense", _compact_payload(payload))
         operations.append(
             OperationResult(name="create-travel-expense", resource_id=_extract_id(response), payload=response)
         )

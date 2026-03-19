@@ -35,14 +35,14 @@ def _normalize_phone_fields(task: ParsedTask) -> None:
     ]
     for alias in aliases:
         if alias in task.fields:
-            task.fields["phoneNumberMobile"] = str(task.fields.pop(alias))
+            task.fields["phoneNumberMobile"] = str(task.fields.pop(alias)).replace(" ", "")
             break
 
 
 def _normalize_customer_phone(task: ParsedTask) -> None:
     for alias in ("phone", "phoneNumberWork", "phoneNumberMobile"):
         if alias in task.fields:
-            task.fields["phoneNumber"] = str(task.fields.pop(alias))
+            task.fields["phoneNumber"] = str(task.fields.pop(alias)).replace(" ", "")
             break
 
 
