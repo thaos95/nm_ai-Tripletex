@@ -43,4 +43,7 @@ def test_parse_create_project_with_customer_and_org_number() -> None:
     assert parsed.fields["name"] == "Analysis Oakwood"
     assert parsed.related_entities["customer"]["name"] == "Oakwood Ltd"
     assert parsed.related_entities["customer"]["organizationNumber"] == "849612913"
+    assert parsed.related_entities["project_manager"]["first_name"] == "Lucy"
+    assert parsed.related_entities["project_manager"]["last_name"] == "Taylor"
+    assert parsed.related_entities["project_manager"]["email"] == "lucy.taylor@example.org"
     assert "phone" not in parsed.fields

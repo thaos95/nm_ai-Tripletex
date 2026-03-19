@@ -36,6 +36,36 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
     return customer_id
 
 
+def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
+    match_fields = {}
+    if spec.get("email"):
+        match_fields["email"] = spec["email"]
+    else:
+        if spec.get("first_name"):
+            match_fields["first_name"] = spec["first_name"]
+        if spec.get("last_name"):
+            match_fields["last_name"] = spec["last_name"]
+
+    existing = client.find_single("employee", match_fields) if match_fields else None
+    if existing:
+        employee_id = existing["id"]
+        operations.append(OperationResult(name="resolve-employee", resource_id=employee_id, payload=existing))
+        return employee_id
+
+    department_id = _resolve_department(client, operations)
+    payload = {
+        "firstName": spec.get("first_name"),
+        "lastName": spec.get("last_name"),
+        "email": spec.get("email"),
+        "userType": 1,
+        "department": {"id": department_id} if department_id is not None else None,
+    }
+    response = client.create_resource("employee", _compact_payload(payload))
+    employee_id = _extract_id(response)
+    operations.append(OperationResult(name="create-employee", resource_id=employee_id, payload=response))
+    return employee_id
+
+
 def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
     match_fields = {}
     if spec.get("name"):
@@ -152,6 +182,11 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id = _resolve_customer(client, customer_spec, operations)
             if customer_id is not None:
                 payload["customer"] = {"id": customer_id}
+        manager_spec = related.get("project_manager")
+        if manager_spec:
+            manager_id = _resolve_employee(client, manager_spec, operations)
+            if manager_id is not None:
+                payload["projectManager"] = {"id": manager_id}
         response = client.create_resource("project", _compact_payload(payload))
         operations.append(OperationResult(name="create-project", resource_id=_extract_id(response), payload=response))
 

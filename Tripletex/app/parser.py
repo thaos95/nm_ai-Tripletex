@@ -119,6 +119,17 @@ def _extract_named_entity(prompt: str, keywords: List[str]) -> Optional[str]:
     return None
 
 
+def _extract_project_manager_name(prompt: str) -> Optional[str]:
+    match = re.search(
+        r"(?:project manager|prosjektleder)\s+(?:is\s+)?([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
+        prompt,
+        re.IGNORECASE,
+    )
+    if match:
+        return _clean_name(match.group(1))
+    return None
+
+
 def _split_person_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if not name:
         return None, None
@@ -261,9 +272,16 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             org_number = _extract_org_number(prompt)
             if org_number:
                 related_entities["customer"]["organizationNumber"] = org_number
-        manager_name = _extract_named_entity(prompt, ["project manager", "prosjektleder"])
+        manager_name = _extract_project_manager_name(prompt)
         if manager_name:
-            fields["projectManagerName"] = manager_name
+            manager_first_name, manager_last_name = _split_person_name(manager_name)
+            related_entities["project_manager"] = {}
+            if manager_first_name:
+                related_entities["project_manager"]["first_name"] = manager_first_name
+            if manager_last_name:
+                related_entities["project_manager"]["last_name"] = manager_last_name
+            if "email" in fields:
+                related_entities["project_manager"]["email"] = fields["email"]
         return ParsedTask(
             task_type=TaskType.CREATE_PROJECT,
             confidence=0.81,
