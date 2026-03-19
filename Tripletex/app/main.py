@@ -10,6 +10,7 @@ from app.logging_utils import get_logger
 from app.parser import parse_prompt
 from app.planner import build_plan
 from app.schemas import SolveRequest, SolveResponse, TaskType
+from app.validator import validate_and_normalize_task
 from app.workflows.executor import execute_plan
 
 logger = get_logger()
@@ -60,6 +61,8 @@ def solve(
         parsing_input = "{0}\n\nAttachment text:\n{1}".format(parsing_input, attachment_text)
 
     parsed_task = parse_prompt(parsing_input)
+    validation = validate_and_normalize_task(parsed_task)
+    parsed_task = validation.parsed_task
     plan = build_plan(parsed_task)
 
     logger.info(
@@ -72,6 +75,21 @@ def solve(
         parsed_task.match_fields,
         parsed_task.related_entities,
     )
+    if validation.warnings:
+        logger.warning(
+            "solve_validation_warnings task_type=%s safety=%s warnings=%r",
+            parsed_task.task_type,
+            validation.safety,
+            validation.warnings,
+        )
+    if validation.blocking_error:
+        logger.error(
+            "solve_validation_blocked task_type=%s detail=%s prompt=%r",
+            parsed_task.task_type,
+            validation.blocking_error,
+            request.prompt[:500],
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=validation.blocking_error)
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
         return SolveResponse()

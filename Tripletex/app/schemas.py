@@ -1,7 +1,9 @@
+import base64
+import binascii
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 Scalar = Union[str, int, float, bool]
@@ -28,16 +30,52 @@ class FilePayload(BaseModel):
     content_base64: str
     mime_type: str
 
+    @field_validator("filename", "mime_type", "content_base64")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("Field must not be empty")
+        return value
+
+    @field_validator("content_base64")
+    @classmethod
+    def validate_base64_payload(cls, value: str) -> str:
+        try:
+            base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("content_base64 must be valid base64") from exc
+        return value
+
 
 class TripletexCredentials(BaseModel):
     base_url: HttpUrl
     session_token: str
+
+    @field_validator("session_token")
+    @classmethod
+    def validate_session_token(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("session_token must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_https_base_url(self) -> "TripletexCredentials":
+        if self.base_url.scheme != "https":
+            raise ValueError("base_url must use https")
+        return self
 
 
 class SolveRequest(BaseModel):
     prompt: str
     files: List[FilePayload] = Field(default_factory=list)
     tripletex_credentials: TripletexCredentials
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("prompt must not be empty")
+        return value
 
 
 class SolveResponse(BaseModel):

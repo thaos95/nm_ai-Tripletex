@@ -216,7 +216,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if last_name:
             match_fields["last_name"] = last_name
         if "phone" in fields:
-            fields["mobilePhoneNumber"] = fields.pop("phone")
+            fields["phoneNumberMobile"] = fields.pop("phone")
         return ParsedTask(
             task_type=TaskType.UPDATE_EMPLOYEE,
             confidence=0.84,

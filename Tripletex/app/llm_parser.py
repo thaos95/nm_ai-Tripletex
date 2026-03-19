@@ -58,9 +58,10 @@ Use these task types exactly:
 Map natural language from Norwegian, English, Spanish, Portuguese, Nynorsk, German, or French.
 Use Tripletex-style field names in fields when known, for example:
 - first_name, last_name, email
-- mobilePhoneNumber, phoneNumber
+- phoneNumberMobile, phoneNumber
 - priceExcludingVatCurrency
 - invoiceDate, invoiceDueDate, orderDate, deliveryDate
+- date, amount, description
 - travel_expense_id, voucher_id
 
 For related_entities, use nested objects like:

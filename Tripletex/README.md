@@ -92,3 +92,20 @@ OPENAI_MODEL=gpt-5-mini
 ```
 
 Da prover agenten en strukturert OpenAI-parser forst og faller tilbake til regel-parseren hvis LLM-kallet feiler eller mangler nokkel.
+
+## Smoke Tests
+
+Kjor flere representative `/solve`-tester automatisk:
+
+```powershell
+$env:TRIPLETEX_SESSION_TOKEN="your-sandbox-token"
+.venv\Scripts\python .\scripts\smoke_test.py
+```
+
+Test bare ett case:
+
+```powershell
+$env:TRIPLETEX_SESSION_TOKEN="your-sandbox-token"
+$env:TRIPLETEX_TEST_NAME="create_project_oakwood"
+.venv\Scripts\python .\scripts\smoke_test.py
+```

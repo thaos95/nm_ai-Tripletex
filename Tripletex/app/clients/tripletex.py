@@ -69,6 +69,7 @@ class TripletexClient:
             "first_name": "firstName",
             "last_name": "lastName",
             "mobilePhoneNumber": "mobilePhoneNumber",
+            "phoneNumberMobile": "phoneNumberMobile",
             "phoneNumber": "phoneNumber",
         }
         nested = nested_map.get(field)
@@ -85,7 +86,6 @@ class TripletexClient:
             if key in match_fields:
                 param_name = "firstName" if key == "first_name" else "lastName" if key == "last_name" else key
                 query_params[param_name] = match_fields[key]
-                break
 
         response = self.list_resource(resource, **query_params)
         values = response.get("values", [])
