@@ -59,6 +59,19 @@ def test_parse_create_project_with_customer_and_org_number() -> None:
     assert "phone" not in parsed.fields
 
 
+def test_parse_norwegian_project_with_customer_and_manager() -> None:
+    parsed = parse_prompt(
+        'Opprett prosjektet "Implementering Tindra" knyttet til kunden Tindra AS (org.nr 886715536). Prosjektleder er Jonas Haugen (jonas.haugen@example.org).'
+    )
+    assert parsed.task_type == TaskType.CREATE_PROJECT
+    assert parsed.fields["name"] == "Implementering Tindra"
+    assert parsed.related_entities["customer"]["name"] == "Tindra AS"
+    assert parsed.related_entities["customer"]["organizationNumber"] == "886715536"
+    assert parsed.related_entities["project_manager"]["first_name"] == "Jonas"
+    assert parsed.related_entities["project_manager"]["last_name"] == "Haugen"
+    assert parsed.related_entities["project_manager"]["email"] == "jonas.haugen@example.org"
+
+
 def test_parse_list_employees_prompt() -> None:
     parsed = parse_prompt("Hent ansatte")
     assert parsed.task_type == TaskType.LIST_EMPLOYEES

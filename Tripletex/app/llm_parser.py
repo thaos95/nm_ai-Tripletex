@@ -80,6 +80,28 @@ Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-e
 """
 
 
+def _sanitize_scalar_mapping(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized: Dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, (str, int, float, bool)):
+            sanitized[str(key)] = item
+    return sanitized
+
+
+def _sanitize_related_mapping(value: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized: Dict[str, Dict[str, Any]] = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            nested = _sanitize_scalar_mapping(item)
+            if nested:
+                sanitized[str(key)] = nested
+    return sanitized
+
+
 def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
     if not settings.openai_api_key:
         return None
@@ -134,15 +156,29 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
         if not output_text:
             return None
         parsed = json.loads(output_text)
+        fields = _sanitize_scalar_mapping(json.loads(parsed["fields_json"]))
+        match_fields_raw = json.loads(parsed["match_fields_json"])
+        related_entities = _sanitize_related_mapping(json.loads(parsed["related_entities_json"]))
+        match_fields = _sanitize_scalar_mapping(match_fields_raw)
+        notes = list(parsed["notes"])
+        if isinstance(match_fields_raw, dict):
+            for key, value in match_fields_raw.items():
+                if isinstance(value, dict):
+                    nested = _sanitize_scalar_mapping(value)
+                    if nested:
+                        existing = related_entities.get(str(key), {})
+                        existing.update(nested)
+                        related_entities[str(key)] = existing
+                        notes.append("Moved nested match_fields.{0} into related_entities".format(key))
         return ParsedTask(
             task_type=TaskType(parsed["task_type"]),
             confidence=float(parsed["confidence"]),
             language_hint=str(parsed["language_hint"]),
-            fields=dict(json.loads(parsed["fields_json"])),
-            match_fields=dict(json.loads(parsed["match_fields_json"])),
-            related_entities=dict(json.loads(parsed["related_entities_json"])),
+            fields=fields,
+            match_fields=match_fields,
+            related_entities=related_entities,
             attachments_required=bool(parsed["attachments_required"]),
-            notes=list(parsed["notes"]),
+            notes=notes,
         )
     except Exception:
         logger.exception("openai_parse_exception model=%s", settings.openai_model)

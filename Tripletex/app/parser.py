@@ -146,6 +146,26 @@ def _split_person_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str
     return parts[0], " ".join(parts[1:])
 
 
+def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
+    pattern = r"(?:project manager|prosjektleder)\s+(?:(?:is|er)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)"
+    match = re.search(pattern, prompt, re.IGNORECASE)
+    if match:
+        return _clean_name(match.group(1))
+    return _extract_project_manager_name(prompt)
+
+
+def _extract_project_customer_name(prompt: str) -> Optional[str]:
+    patterns = [
+        r"(?:linked to the customer|for kunde|for kunden|knyttet til kunden|knyttet til kunde)\s+([A-Z][^,(.\n]+)",
+        r"(?:customer|kunde|kunden|client|cliente)\s+([A-Z][^,(.\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return _extract_named_entity(prompt, ["kunde", "kunden", "customer", "cliente", "client"])
+
+
 def _extract_amount(prompt: str) -> Optional[float]:
     amount = _first_match(NUMBER_RE, prompt)
     if amount is None:
@@ -254,7 +274,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "customer" and action == "create":
-        customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+        customer_name = _extract_project_customer_name(prompt)
         fields["name"] = customer_name or "Unknown Customer"
         fields["isCustomer"] = True
         return ParsedTask(
@@ -265,7 +285,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "customer" and action == "update":
-        customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+        customer_name = _extract_project_customer_name(prompt)
         if customer_name:
             match_fields["name"] = customer_name
         if "phone" in fields:
@@ -279,7 +299,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "customer" and action == "read":
-        customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+        customer_name = _extract_project_customer_name(prompt)
         if customer_name:
             match_fields["name"] = customer_name
         org_number = _extract_org_number(prompt)
@@ -312,13 +332,13 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projekt"])
         fields["name"] = project_name or "Unknown Project"
         fields["startDate"] = fields.get("date") or "2026-03-19"
-        customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+        customer_name = _extract_project_customer_name(prompt)
         if customer_name:
             related_entities["customer"] = {"name": customer_name, "isCustomer": True}
             org_number = _extract_org_number(prompt)
             if org_number:
                 related_entities["customer"]["organizationNumber"] = org_number
-        manager_name = _extract_project_manager_name(prompt)
+        manager_name = _extract_project_manager_name_v2(prompt)
         if manager_name:
             manager_first_name, manager_last_name = _split_person_name(manager_name)
             related_entities["project_manager"] = {}
@@ -451,6 +471,15 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
 def parse_prompt(prompt: str) -> ParsedTask:
     llm_parsed = parse_prompt_with_llm(prompt)
+    rule_based = parse_prompt_rule_based(prompt)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
+        if llm_parsed.task_type == TaskType.CREATE_PROJECT and rule_based.task_type == TaskType.CREATE_PROJECT:
+            if "name" not in llm_parsed.fields and "name" in rule_based.fields:
+                llm_parsed.fields["name"] = rule_based.fields["name"]
+            if "startDate" not in llm_parsed.fields and "startDate" in rule_based.fields:
+                llm_parsed.fields["startDate"] = rule_based.fields["startDate"]
+            for key, value in rule_based.related_entities.items():
+                if key not in llm_parsed.related_entities:
+                    llm_parsed.related_entities[key] = value
         return llm_parsed
-    return parse_prompt_rule_based(prompt)
+    return rule_based
