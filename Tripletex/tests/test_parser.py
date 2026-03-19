@@ -47,3 +47,15 @@ def test_parse_create_project_with_customer_and_org_number() -> None:
     assert parsed.related_entities["project_manager"]["last_name"] == "Taylor"
     assert parsed.related_entities["project_manager"]["email"] == "lucy.taylor@example.org"
     assert "phone" not in parsed.fields
+
+
+def test_parse_list_employees_prompt() -> None:
+    parsed = parse_prompt("Hent ansatte")
+    assert parsed.task_type == TaskType.LIST_EMPLOYEES
+    assert parsed.fields["fields"] == "id,firstName,lastName,email"
+
+
+def test_parse_search_customers_prompt() -> None:
+    parsed = parse_prompt("Finn alle kunder med orgnr 849612913")
+    assert parsed.task_type == TaskType.SEARCH_CUSTOMERS
+    assert parsed.match_fields["organizationNumber"] == "849612913"

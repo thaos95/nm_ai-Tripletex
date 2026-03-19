@@ -14,6 +14,8 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
                 PlannedStep(name="update-employee", resource="employee", action="update"),
             ]
         )
+    elif task_type == TaskType.LIST_EMPLOYEES:
+        steps.append(PlannedStep(name="list-employees", resource="employee", action="list"))
     elif task_type == TaskType.CREATE_CUSTOMER:
         steps.append(PlannedStep(name="create-customer", resource="customer", action="create"))
     elif task_type == TaskType.UPDATE_CUSTOMER:
@@ -23,6 +25,8 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
                 PlannedStep(name="update-customer", resource="customer", action="update"),
             ]
         )
+    elif task_type == TaskType.SEARCH_CUSTOMERS:
+        steps.append(PlannedStep(name="search-customers", resource="customer", action="list"))
     elif task_type == TaskType.CREATE_PRODUCT:
         steps.append(PlannedStep(name="create-product", resource="product", action="create"))
     elif task_type == TaskType.CREATE_PROJECT:
@@ -62,5 +66,9 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
         )
     elif task_type == TaskType.DELETE_VOUCHER:
         steps.append(PlannedStep(name="delete-voucher", resource="ledger/voucher", action="delete"))
+    elif task_type == TaskType.LIST_LEDGER_ACCOUNTS:
+        steps.append(PlannedStep(name="list-ledger-accounts", resource="ledger/account", action="list"))
+    elif task_type == TaskType.LIST_LEDGER_POSTINGS:
+        steps.append(PlannedStep(name="list-ledger-postings", resource="ledger/posting", action="list"))
 
     return ExecutionPlan(parsed_task=parsed_task, steps=steps)

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import httpx
+import re
 
 
 class TripletexClientError(RuntimeError):
@@ -64,7 +65,7 @@ class TripletexClient:
     def _match_value(self, candidate: Dict[str, Any], field: str) -> Optional[str]:
         value = candidate.get(field)
         if value is not None:
-            return str(value).strip().lower()
+            return self._normalize_string(value)
         nested_map = {
             "first_name": "firstName",
             "last_name": "lastName",
@@ -74,14 +75,33 @@ class TripletexClient:
         }
         nested = nested_map.get(field)
         if nested and candidate.get(nested) is not None:
-            return str(candidate.get(nested)).strip().lower()
+            return self._normalize_string(candidate.get(nested))
         return None
+
+    def _normalize_string(self, value: Any) -> str:
+        text = str(value).strip().lower()
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    def _candidate_matches(self, candidate: Dict[str, Any], normalized_match: Dict[str, str]) -> bool:
+        if all(self._match_value(candidate, key) == value for key, value in normalized_match.items()):
+            return True
+
+        first_name = normalized_match.get("first_name")
+        last_name = normalized_match.get("last_name")
+        if first_name and last_name:
+            candidate_full_name = self._normalize_string(
+                "{0} {1}".format(candidate.get("firstName", ""), candidate.get("lastName", "")).strip()
+            )
+            target_full_name = self._normalize_string("{0} {1}".format(first_name, last_name))
+            return candidate_full_name == target_full_name
+        return False
 
     def find_single(self, resource: str, match_fields: Dict[str, Any], fields: str = "*") -> Optional[Dict[str, Any]]:
         if not match_fields:
             return None
 
-        query_params = {"fields": fields, "count": 100}
+        query_params = {"fields": fields, "count": 200}
         for key in ("name", "email", "first_name", "last_name"):
             if key in match_fields:
                 param_name = "firstName" if key == "first_name" else "lastName" if key == "last_name" else key
@@ -92,10 +112,10 @@ class TripletexClient:
         if not values:
             return None
 
-        normalized_match = dict((key, str(value).strip().lower()) for key, value in match_fields.items())
+        normalized_match = dict((key, self._normalize_string(value)) for key, value in match_fields.items())
         exact_matches = []
         for candidate in values:
-            if all(self._match_value(candidate, key) == value for key, value in normalized_match.items()):
+            if self._candidate_matches(candidate, normalized_match):
                 exact_matches.append(candidate)
 
         if len(exact_matches) == 1:

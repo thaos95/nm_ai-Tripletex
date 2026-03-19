@@ -165,10 +165,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         employee = client.find_single("employee", match_fields)
         if employee is None:
             raise TripletexClientError("Could not uniquely resolve employee for update")
-        payload = dict(employee)
+        employee_detail = client.find_by_id("employee", int(employee["id"])) or employee
+        payload = dict(employee_detail)
         payload.update(_compact_payload(fields))
         response = client.update_resource("employee", int(employee["id"]), payload)
         operations.append(OperationResult(name="update-employee", resource_id=employee["id"], payload=response))
+
+    elif task_type == TaskType.LIST_EMPLOYEES:
+        response = client.list_resource("employee", fields=fields.get("fields", "id,firstName,lastName,email"), count=fields.get("count", 100))
+        operations.append(OperationResult(name="list-employees", payload=response))
 
     elif task_type == TaskType.CREATE_CUSTOMER:
         response = client.create_resource("customer", _compact_payload(fields))
@@ -184,6 +189,16 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         payload.update(_compact_payload(fields))
         response = client.update_resource("customer", int(customer["id"]), payload)
         operations.append(OperationResult(name="update-customer", resource_id=customer["id"], payload=response))
+
+    elif task_type == TaskType.SEARCH_CUSTOMERS:
+        params = {
+            "fields": fields.get("fields", "id,name,email,organizationNumber"),
+            "count": fields.get("count", 100),
+        }
+        if match_fields.get("name"):
+            params["name"] = match_fields["name"]
+        response = client.list_resource("customer", **params)
+        operations.append(OperationResult(name="search-customers", payload=response))
 
     elif task_type == TaskType.CREATE_PRODUCT:
         response = client.create_resource("product", _compact_payload(fields))
@@ -286,5 +301,21 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="lookup-voucher", resource_id=int(voucher_id), payload=voucher))
         client.delete_resource("ledger/voucher", int(voucher_id))
         operations.append(OperationResult(name="delete-voucher", resource_id=int(voucher_id)))
+
+    elif task_type == TaskType.LIST_LEDGER_ACCOUNTS:
+        response = client.list_resource(
+            "ledger/account",
+            fields=fields.get("fields", "id,number,name"),
+            count=fields.get("count", 100),
+        )
+        operations.append(OperationResult(name="list-ledger-accounts", payload=response))
+
+    elif task_type == TaskType.LIST_LEDGER_POSTINGS:
+        response = client.list_resource(
+            "ledger/posting",
+            fields=fields.get("fields", "id,date,amount,description"),
+            count=fields.get("count", 100),
+        )
+        operations.append(OperationResult(name="list-ledger-postings", payload=response))
 
     return ExecutionResult(task_type=task_type, operations=operations)

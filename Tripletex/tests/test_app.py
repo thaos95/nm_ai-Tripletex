@@ -30,8 +30,27 @@ def mock_transport() -> httpx.MockTransport:
             payload = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": payload})
 
+        if request.method == "GET" and request.url.path == "/v2/employee/1001":
+            return httpx.Response(
+                200,
+                json={
+                    "value": {
+                        "id": 1001,
+                        "firstName": "Marte",
+                        "lastName": "Solberg",
+                        "dateOfBirth": "1990-01-01",
+                    }
+                },
+            )
+
         if request.method == "GET" and request.url.path == "/v2/customer":
             name = request.url.params.get("name")
+            fields = request.url.params.get("fields")
+            if fields == "id,name,email,organizationNumber":
+                return httpx.Response(
+                    200,
+                    json={"fullResultSize": 1, "values": [{"id": 2001, "name": "Acme AS", "organizationNumber": "849612913"}]},
+                )
             if name == "Acme AS":
                 return httpx.Response(
                     200,
@@ -51,6 +70,13 @@ def mock_transport() -> httpx.MockTransport:
 
         if request.method == "POST" and request.url.path == "/v2/product":
             return httpx.Response(200, json={"value": {"id": 3001}})
+
+        if request.method == "GET" and request.url.path == "/v2/employee":
+            if request.url.params.get("fields") == "id,firstName,lastName,email" and request.url.params.get("count") == "100":
+                return httpx.Response(
+                    200,
+                    json={"fullResultSize": 1, "values": [{"id": 1001, "firstName": "Ola", "lastName": "Nordmann", "email": "ola@example.org"}]},
+                )
 
         if request.method == "POST" and request.url.path == "/v2/project":
             return httpx.Response(200, json={"value": {"id": 4001}})
@@ -77,6 +103,12 @@ def mock_transport() -> httpx.MockTransport:
             payload = json.loads(request.content.decode("utf-8"))
             payload["id"] = 7001
             return httpx.Response(200, json={"value": payload})
+
+        if request.method == "GET" and request.url.path == "/v2/ledger/account":
+            return httpx.Response(200, json={"fullResultSize": 1, "values": [{"id": 1, "number": 1000, "name": "Kasse"}]})
+
+        if request.method == "GET" and request.url.path == "/v2/ledger/posting":
+            return httpx.Response(200, json={"fullResultSize": 1, "values": [{"id": 1, "date": "2026-01-10", "amount": 100.0}]})
 
         return httpx.Response(404, json={"error": {"message": "not found"}})
 
@@ -111,6 +143,46 @@ def test_solve_update_customer() -> None:
         "/solve",
         json={
             "prompt": "Oppdater kunde Acme AS med telefon +47 12345678",
+            "files": [],
+            "tripletex_credentials": {
+                "base_url": "https://tx-proxy.ainm.no/v2",
+                "session_token": "token",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
+    app.dependency_overrides.clear()
+
+
+def test_solve_list_employees() -> None:
+    app.dependency_overrides[get_client_transport] = mock_transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Hent ansatte",
+            "files": [],
+            "tripletex_credentials": {
+                "base_url": "https://tx-proxy.ainm.no/v2",
+                "session_token": "token",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
+    app.dependency_overrides.clear()
+
+
+def test_solve_search_customers() -> None:
+    app.dependency_overrides[get_client_transport] = mock_transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Finn alle kunder med orgnr 849612913",
             "files": [],
             "tripletex_credentials": {
                 "base_url": "https://tx-proxy.ainm.no/v2",

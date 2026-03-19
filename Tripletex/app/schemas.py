@@ -12,8 +12,10 @@ Scalar = Union[str, int, float, bool]
 class TaskType(str, Enum):
     CREATE_EMPLOYEE = "create_employee"
     UPDATE_EMPLOYEE = "update_employee"
+    LIST_EMPLOYEES = "list_employees"
     CREATE_CUSTOMER = "create_customer"
     UPDATE_CUSTOMER = "update_customer"
+    SEARCH_CUSTOMERS = "search_customers"
     CREATE_PRODUCT = "create_product"
     CREATE_PROJECT = "create_project"
     CREATE_DEPARTMENT = "create_department"
@@ -22,6 +24,8 @@ class TaskType(str, Enum):
     CREATE_TRAVEL_EXPENSE = "create_travel_expense"
     DELETE_TRAVEL_EXPENSE = "delete_travel_expense"
     DELETE_VOUCHER = "delete_voucher"
+    LIST_LEDGER_ACCOUNTS = "list_ledger_accounts"
+    LIST_LEDGER_POSTINGS = "list_ledger_postings"
     UNSUPPORTED = "unsupported"
 
 

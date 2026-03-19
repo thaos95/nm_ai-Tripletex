@@ -1,4 +1,5 @@
 import base64
+import re
 from typing import Dict, List, Union
 
 from app.schemas import FilePayload
@@ -27,6 +28,11 @@ def extract_attachment_text(decoded_files: List[Dict[str, Union[str, bytes]]]) -
                 chunks.append(content.decode("utf-8"))
             except UnicodeDecodeError:
                 chunks.append(content.decode("latin-1", errors="ignore"))
+        elif mime_type == "application/pdf" and isinstance(content, bytes):
+            decoded = content.decode("latin-1", errors="ignore")
+            printable = re.findall(r"[A-Za-z0-9,.:;@()\/\-\s]{8,}", decoded)
+            if printable:
+                chunks.append(" ".join(segment.strip() for segment in printable[:50] if segment.strip()))
     return "\n".join(chunk.strip() for chunk in chunks if chunk.strip())
 
 

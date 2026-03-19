@@ -16,6 +16,7 @@ QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 CREATE_WORDS = ["opprett", "registrer", "lag", "create", "crear", "criar", "erstellen", "creer"]
 UPDATE_WORDS = ["oppdater", "endre", "set", "update", "actualizar", "aktualisieren", "mettre"]
 DELETE_WORDS = ["slett", "fjern", "delete", "remove", "borrar", "excluir", "loschen", "supprimer"]
+READ_WORDS = ["hent", "list", "liste", "finn", "find", "show", "vis", "search", "sok", "søk", "buscar", "chercher"]
 
 ENTITY_KEYWORDS = {
     "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe"],
@@ -27,6 +28,8 @@ ENTITY_KEYWORDS = {
     "order": ["ordre", "order", "pedido", "bestellung", "commande"],
     "travel_expense": ["reiseregning", "travel expense", "expense report", "viagem", "spesen"],
     "voucher": ["bilag", "voucher", "comprobante", "buchung"],
+    "ledger_account": ["kontoplan", "ledger account", "chart of accounts", "konti"],
+    "ledger_posting": ["hovedboksposteringer", "ledger posting", "postering", "postings", "hovedbok"],
 }
 
 ROLE_MAP = {
@@ -64,6 +67,8 @@ def _detect_action(lowered: str) -> Optional[str]:
         return "update"
     if _contains_any(lowered, DELETE_WORDS):
         return "delete"
+    if _contains_any(lowered, READ_WORDS):
+        return "read"
     return None
 
 
@@ -73,6 +78,8 @@ def _detect_entity(lowered: str) -> Optional[str]:
         "order",
         "travel_expense",
         "voucher",
+        "ledger_posting",
+        "ledger_account",
         "employee",
         "customer",
         "product",
@@ -162,6 +169,15 @@ def _extract_common_fields(prompt: str) -> Dict[str, object]:
     return fields
 
 
+def _extract_numeric_id(prompt: str) -> Optional[int]:
+    amount = _extract_amount(prompt)
+    if amount is None:
+        return None
+    if amount.is_integer():
+        return int(amount)
+    return None
+
+
 def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     related_entities = {}
     customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
@@ -225,6 +241,16 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             match_fields=match_fields,
         )
 
+    if entity == "employee" and action == "read":
+        fields["fields"] = "id,firstName,lastName,email"
+        fields["count"] = 100
+        return ParsedTask(
+            task_type=TaskType.LIST_EMPLOYEES,
+            confidence=0.82,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+        )
+
     if entity == "customer" and action == "create":
         customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
         fields["name"] = customer_name or "Unknown Customer"
@@ -245,6 +271,23 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         return ParsedTask(
             task_type=TaskType.UPDATE_CUSTOMER,
             confidence=0.82,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+            match_fields=match_fields,
+        )
+
+    if entity == "customer" and action == "read":
+        customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+        if customer_name:
+            match_fields["name"] = customer_name
+        org_number = _extract_org_number(prompt)
+        if org_number:
+            match_fields["organizationNumber"] = org_number
+        fields["fields"] = "id,name,email,organizationNumber"
+        fields["count"] = 100
+        return ParsedTask(
+            task_type=TaskType.SEARCH_CUSTOMERS,
+            confidence=0.8,
             language_hint=_language_hint(prompt),
             fields=fields,
             match_fields=match_fields,
@@ -337,6 +380,29 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         return ParsedTask(
             task_type=TaskType.DELETE_VOUCHER,
             confidence=0.75,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+        )
+
+    if entity == "ledger_account" and action == "read":
+        fields["fields"] = "id,number,name"
+        fields["count"] = 100
+        return ParsedTask(
+            task_type=TaskType.LIST_LEDGER_ACCOUNTS,
+            confidence=0.76,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+        )
+
+    if entity == "ledger_posting" and action == "read":
+        fields["fields"] = "id,date,amount,description"
+        fields["count"] = 100
+        month_match = re.search(r"(?:for|i)\s+(januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember|january)", lowered)
+        if month_match:
+            fields["period_hint"] = month_match.group(1)
+        return ParsedTask(
+            task_type=TaskType.LIST_LEDGER_POSTINGS,
+            confidence=0.72,
             language_hint=_language_hint(prompt),
             fields=fields,
         )

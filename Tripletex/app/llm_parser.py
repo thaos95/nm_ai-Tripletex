@@ -43,8 +43,10 @@ Prefer the closest supported task type over unsupported when the intent is reaso
 Use these task types exactly:
 - create_employee
 - update_employee
+- list_employees
 - create_customer
 - update_customer
+- search_customers
 - create_product
 - create_project
 - create_department
@@ -53,6 +55,8 @@ Use these task types exactly:
 - create_travel_expense
 - delete_travel_expense
 - delete_voucher
+- list_ledger_accounts
+- list_ledger_postings
 - unsupported
 
 Map natural language from Norwegian, English, Spanish, Portuguese, Nynorsk, German, or French.

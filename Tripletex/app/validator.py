@@ -86,8 +86,10 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
     allowed_fields: Dict[TaskType, Set[str]] = {
         TaskType.CREATE_EMPLOYEE: {"first_name", "last_name", "email", "employee_type"},
         TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
+        TaskType.LIST_EMPLOYEES: {"fields", "count"},
         TaskType.CREATE_CUSTOMER: {"name", "email", "isCustomer", "organizationNumber", "phoneNumber"},
         TaskType.UPDATE_CUSTOMER: {"phoneNumber", "email"},
+        TaskType.SEARCH_CUSTOMERS: {"fields", "count"},
         TaskType.CREATE_PRODUCT: {"name", "priceExcludingVatCurrency"},
         TaskType.CREATE_PROJECT: {"name", "startDate"},
         TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber"},
@@ -96,6 +98,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "description", "distance"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
         TaskType.DELETE_VOUCHER: {"voucher_id"},
+        TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
+        TaskType.LIST_LEDGER_POSTINGS: {"fields", "count", "period_hint"},
     }
     warnings.extend(_drop_unknown_fields(normalized, allowed_fields))
 
@@ -109,6 +113,10 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         if not normalized.fields:
             return ValidationResult(normalized, blocking_error="Employee update requires at least one mutable field")
 
+    if normalized.task_type == TaskType.LIST_EMPLOYEES:
+        normalized.fields.setdefault("fields", "id,firstName,lastName,email")
+        normalized.fields.setdefault("count", 100)
+
     if normalized.task_type == TaskType.CREATE_CUSTOMER:
         if not normalized.fields.get("name"):
             return ValidationResult(normalized, blocking_error="Customer creation requires customer name")
@@ -118,6 +126,10 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             return ValidationResult(normalized, blocking_error="Customer update requires identifying fields")
         if not normalized.fields:
             return ValidationResult(normalized, blocking_error="Customer update requires at least one mutable field")
+
+    if normalized.task_type == TaskType.SEARCH_CUSTOMERS:
+        normalized.fields.setdefault("fields", "id,name,email,organizationNumber")
+        normalized.fields.setdefault("count", 100)
 
     if normalized.task_type == TaskType.CREATE_PRODUCT:
         if not normalized.fields.get("name"):
@@ -149,6 +161,14 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
 
     if normalized.task_type == TaskType.DELETE_VOUCHER and "voucher_id" not in normalized.fields:
         return ValidationResult(normalized, blocking_error="Voucher deletion requires voucher id")
+
+    if normalized.task_type == TaskType.LIST_LEDGER_ACCOUNTS:
+        normalized.fields.setdefault("fields", "id,number,name")
+        normalized.fields.setdefault("count", 100)
+
+    if normalized.task_type == TaskType.LIST_LEDGER_POSTINGS:
+        normalized.fields.setdefault("fields", "id,date,amount,description")
+        normalized.fields.setdefault("count", 100)
 
     safety = "safe"
     if warnings:
