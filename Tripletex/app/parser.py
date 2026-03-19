@@ -231,6 +231,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             match_fields["first_name"] = first_name
         if last_name:
             match_fields["last_name"] = last_name
+        if "email" in fields:
+            match_fields["email"] = fields.pop("email")
         if "phone" in fields:
             fields["phoneNumberMobile"] = fields.pop("phone")
         return ParsedTask(

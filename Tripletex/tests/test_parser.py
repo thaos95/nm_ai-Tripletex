@@ -22,6 +22,15 @@ def test_parse_update_customer_prompt() -> None:
     assert parsed.fields["phoneNumber"] == "+4712345678"
 
 
+def test_parse_update_employee_prompt_uses_email_for_matching() -> None:
+    parsed = parse_prompt("Oppdater ansatt Marte Solberg med e-post marte@example.org og telefon +47 41234567")
+    assert parsed.task_type == TaskType.UPDATE_EMPLOYEE
+    assert parsed.match_fields["first_name"] == "Marte"
+    assert parsed.match_fields["last_name"] == "Solberg"
+    assert parsed.match_fields["email"] == "marte@example.org"
+    assert parsed.fields["phoneNumberMobile"] == "+4741234567"
+
+
 def test_parse_create_invoice_prompt() -> None:
     parsed = parse_prompt('Create invoice for customer "Acme AS" with product "Consulting" 1500')
     assert parsed.task_type == TaskType.CREATE_INVOICE

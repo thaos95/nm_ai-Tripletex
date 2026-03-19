@@ -20,6 +20,7 @@ class TestCase:
 
 
 def build_test_cases() -> List[TestCase]:
+    include_probes = os.getenv("TRIPLETEX_INCLUDE_PROBES", "").lower() in {"1", "true", "yes"}
     suffix = os.getenv("TRIPLETEX_TEST_SUFFIX") or datetime.utcnow().strftime("%m%d%H%M%S")
     customer_name = "Nordlys Test {0} AS".format(suffix)
     customer_email = "nordlys.{0}@example.org".format(suffix)
@@ -32,7 +33,7 @@ def build_test_cases() -> List[TestCase]:
     customer_fr = "Client Bleu {0} SARL".format(suffix)
     customer_de = "Blau {0} GmbH".format(suffix)
 
-    return [
+    cases = [
         TestCase("create_customer_no", "Opprett kunde {0}, {1}".format(customer_name, customer_email), []),
         TestCase("update_customer_no", "Oppdater kunde {0} med telefon +47 48001234".format(customer_name), []),
         TestCase(
@@ -45,7 +46,7 @@ def build_test_cases() -> List[TestCase]:
             "Oppdater ansatt {0} med e-post {1} og telefon +47 41234567".format(employee_full_name, employee_email),
             [],
         ),
-        TestCase("create_product_no", "Opprett produkt {0} 2500".format(product_name), []),
+        TestCase('create_product_no', 'Opprett produkt "{0}" med pris 2500'.format(product_name), []),
         TestCase("create_department_no", "Opprett avdeling Strategi {0}".format(department_number), []),
         TestCase("create_project_no", "Opprett prosjekt {0} for kunde {1}".format(project_name, customer_name), []),
         TestCase(
@@ -63,14 +64,20 @@ def build_test_cases() -> List[TestCase]:
             [],
         ),
         TestCase("create_travel_expense_no", "Opprett reiseregning 2026-03-19 med belop 450", []),
-        TestCase("delete_travel_expense_no", "Slett reiseregning 42", []),
-        TestCase("delete_voucher_no", "Slett bilag 7", []),
-        TestCase(
-            "create_invoice_en",
-            'Create invoice for customer "{0}" with product "{1}" 2500'.format(customer_name, product_name),
-            [],
-        ),
     ]
+    if include_probes:
+        cases.extend(
+            [
+                TestCase("delete_travel_expense_no", "Slett reiseregning 42", []),
+                TestCase("delete_voucher_no", "Slett bilag 7", []),
+                TestCase(
+                    "create_invoice_en",
+                    'Create invoice for customer "{0}" with product "{1}" 2500'.format(customer_name, product_name),
+                    [],
+                ),
+            ]
+        )
+    return cases
 
 
 def build_payload(prompt: str, files: List[dict], base_url: str, session_token: str) -> dict:
