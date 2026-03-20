@@ -99,7 +99,7 @@ def test_parse_supplier_customer_with_address() -> None:
     assert validated.parsed_task.task_type == TaskType.CREATE_CUSTOMER
     assert validated.parsed_task.fields["isSupplier"] is True
     assert validated.parsed_task.fields["organizationNumber"] == "892196753"
-    assert validated.parsed_task.related_entities["customer_address"]["address"] == "Parkveien 45"
+    assert validated.parsed_task.related_entities["customer_address"]["addressStreet"] == "Parkveien 45"
     assert validated.parsed_task.related_entities["customer_address"]["postalCode"] == "5003"
     assert validated.parsed_task.related_entities["customer_address"]["city"] == "Bergen"
 
@@ -145,6 +145,27 @@ def test_parse_payment_prompt_maps_to_invoice_flow() -> None:
     assert validated.parsed_task.fields["paymentDate"] == "2026-03-19"
     assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "830362894"
     assert validated.parsed_task.related_entities["invoice"]["description"] == "System Development"
+
+
+def test_parse_portuguese_payment_prompt_maps_to_invoice_flow() -> None:
+    parsed = parse_prompt(
+        'O cliente Floresta Lda (org. nº 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.fields["markAsPaid"] is True
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "916058896"
+    assert validated.parsed_task.related_entities["invoice"]["description"] == "Desenvolvimento de sistemas"
+
+
+def test_parse_nynorsk_invoice_description_without_quotes() -> None:
+    parsed = parse_prompt(
+        "Opprett og send ein faktura til kunden Strandvik AS (org.nr 993504815) på 1800 kr eksklusiv MVA. Fakturaen gjeld Opplæring."
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.related_entities["invoice"]["description"] == "Opplæring"
+    assert validated.parsed_task.related_entities["order"]["description"] == "Opplæring"
 
 
 def test_parse_multi_department_prompt() -> None:

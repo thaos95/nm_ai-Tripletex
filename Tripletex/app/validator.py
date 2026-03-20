@@ -74,6 +74,7 @@ def _normalize_customer_address_fields(task: ParsedTask) -> None:
     address_fields = {}
     for source_key, target_key in (
         ("address", "address"),
+        ("addressStreet", "addressStreet"),
         ("postalCode", "postalCode"),
         ("zip", "postalCode"),
         ("zipCode", "postalCode"),

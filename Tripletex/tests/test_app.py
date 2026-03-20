@@ -641,6 +641,41 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     app.dependency_overrides.clear()
 
 
+def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'O cliente Floresta Lda (org. nº 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Desenvolvimento de sistemas"
+    assert recorded["invoice_payload"]["invoiceDate"] == "2026-03-19"
+    app.dependency_overrides.clear()
+
+
+def test_solve_nynorsk_invoice_uses_description_without_quotes() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Opprett og send ein faktura til kunden Strandvik AS (org.nr 993504815) på 1800 kr eksklusiv MVA. Fakturaen gjeld Opplæring.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Opplæring"
+    app.dependency_overrides.clear()
+
+
 def test_solve_create_multiple_departments() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)

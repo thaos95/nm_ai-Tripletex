@@ -41,7 +41,7 @@ ENTITY_KEYWORDS = {
     "product": ["produkt", "product", "producto", "produto"],
     "project": ["prosjekt", "project", "proyecto", "projekt", "projet"],
     "department": ["avdeling", "department", "departamento", "abteilung", "departement"],
-    "invoice": ["faktura", "invoice", "factura", "rechnung", "facture"],
+    "invoice": ["faktura", "invoice", "factura", "fatura", "rechnung", "facture"],
     "order": ["ordre", "order", "pedido", "bestellung", "commande"],
     "travel_expense": ["reiseregning", "travel expense", "expense report", "viagem", "spesen"],
     "voucher": ["bilag", "voucher", "comprobante", "buchung"],
@@ -252,7 +252,11 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
 
 
 def _extract_org_number(prompt: str) -> Optional[str]:
-    match = re.search(r"(?:org(?:anization)?\s*no\.?|orgnr\.?|org\.nr\.?|organisasjonsnummer)\s*(\d{9})", prompt, re.IGNORECASE)
+    match = re.search(
+        r"(?:org(?:anization)?\.?\s*(?:no\.?|n\S?\.?)|org[\.\-\s]*nr\.?|organisasjonsnummer)\s*(\d{9})",
+        prompt,
+        re.IGNORECASE,
+    )
     if match:
         return match.group(1)
     return None
@@ -282,9 +286,10 @@ def _extract_address_fields(prompt: str) -> Dict[str, str]:
         match = re.search(pattern, prompt, re.IGNORECASE)
         if match:
             return {
-                "address": match.group(1).strip(),
+                "addressStreet": match.group(1).strip(),
                 "postalCode": match.group(2).strip(),
                 "city": match.group(3).strip(" ."),
+                "country": "NO",
             }
     return {}
 
@@ -353,6 +358,9 @@ def _extract_invoice_description(prompt: str) -> Optional[str]:
     quoted = QUOTED_RE.findall(prompt)
     if quoted:
         return quoted[-1].strip()
+    nynorsk_match = re.search(r"(?:gjeld)\s+([A-ZÃ†Ã˜Ã…Ã‰][^.\n]+)", prompt, re.IGNORECASE)
+    if nynorsk_match:
+        return _clean_name(nynorsk_match.group(1))
     patterns = [
         r"(?:concerne|gjelder|betrifft|for)\s+([A-ZÆØÅÉ][^.\n]+)",
     ]
@@ -384,6 +392,9 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             "registrer full betaling",
             "betaling",
             "pago completo",
+            "pagamento total",
+            "pagamento completo",
+            "pagamento",
             "registre le paiement",
             "zahlung",
             "vollstandige zahlung",
@@ -396,7 +407,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         action = "create"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
-    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "rechnung"]) and (
+    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"]) and (
         any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"])
         or payment_detected
     ):
@@ -673,7 +684,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             related_entities.setdefault("order", {})["description"] = description
         if any(token in lowered for token in ["send", "envoy", "sendez"]):
             fields["sendByEmail"] = True
-        if any(token in lowered for token in ["betaling", "pago", "zahlung", "payment"]):
+        if any(token in lowered for token in ["betaling", "pago", "pagamento", "zahlung", "payment"]):
             fields["markAsPaid"] = True
             fields["paymentDate"] = fields["invoiceDate"]
             if amount is not None:
