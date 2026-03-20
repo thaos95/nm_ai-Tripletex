@@ -148,12 +148,24 @@ def _has_order_line_source(task: ParsedTask) -> bool:
     product = task.related_entities.get("product", {})
     order = task.related_entities.get("order", {})
     invoice = task.related_entities.get("invoice", {})
+    explicit_lines = [
+        value
+        for key, value in task.related_entities.items()
+        if key.startswith("order_line_") and isinstance(value, dict)
+    ]
     return bool(
         product.get("id")
         or product.get("name")
         or product.get("description")
         or order.get("description")
         or invoice.get("description")
+        or any(
+            line.get("id")
+            or line.get("name")
+            or line.get("description")
+            or line.get("productNumber")
+            for line in explicit_lines
+        )
     )
 
 

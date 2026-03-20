@@ -280,6 +280,15 @@ def _resolve_product(
     return product_id
 
 
+def _extract_order_line_specs(related_entities: Dict[str, Dict[str, Any]]) -> list:
+    specs = []
+    for key, value in related_entities.items():
+        if key.startswith("order_line_") and isinstance(value, dict):
+            specs.append((key, value))
+    specs.sort(key=lambda item: item[0])
+    return [dict(spec) for _, spec in specs]
+
+
 def _resolve_department(client: TripletexClient, operations: list) -> Optional[int]:
     departments = client.list_resource("department", fields="id,name", count=1)
     values = departments.get("values", [])
@@ -297,14 +306,25 @@ def _create_order(
     parsed_fields: Dict[str, Any],
     product_spec: Dict[str, Any],
     operations: list,
+    order_line_specs: Optional[list] = None,
 ) -> Optional[int]:
-    line = {}
-    if product_id is not None:
-        line["product"] = {"id": product_id}
-    description = product_spec.get("description") or parsed_fields.get("description")
-    if description:
-        line["description"] = description
-    line["count"] = 1
+    order_lines = []
+    if order_line_specs:
+        for spec in order_line_specs:
+            line = {"count": int(spec.get("count", 1))}
+            description = spec.get("description") or spec.get("name") or parsed_fields.get("description")
+            if description:
+                line["description"] = description
+            order_lines.append(_compact_payload(line))
+    else:
+        line = {}
+        if product_id is not None:
+            line["product"] = {"id": product_id}
+        description = product_spec.get("description") or parsed_fields.get("description")
+        if description:
+            line["description"] = description
+        line["count"] = 1
+        order_lines.append(_compact_payload(line))
 
     order_payload = {
         "customer": {"id": customer_id},
@@ -312,7 +332,7 @@ def _create_order(
         "deliveryDate": parsed_fields.get("deliveryDate")
         or parsed_fields.get("orderDate")
         or parsed_fields.get("invoiceDate"),
-        "orderLines": [_compact_payload(line)],
+        "orderLines": order_lines,
     }
     response = client.create_resource("order", _compact_payload(order_payload))
     order_id = _extract_id(response)
@@ -468,6 +488,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         customer_spec = related.get("customer", {})
         product_spec = dict(related.get("product", {}))
         order_spec = dict(related.get("order", {}))
+        order_line_specs = _extract_order_line_specs(related)
         if order_spec.get("description") and "description" not in product_spec:
             product_spec["description"] = order_spec["description"]
         if product_spec.get("name") and "description" not in product_spec:
@@ -482,10 +503,18 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             raise TripletexClientError("Order requires resolvable customer")
         product_id = (
             _resolve_product(client, product_spec, operations, allow_create=False)
-            if _should_resolve_product_for_order_line(product_spec)
+            if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
             else None
         )
-        order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
+        order_id = _create_order(
+            client,
+            customer_id,
+            product_id,
+            fields,
+            product_spec,
+            operations,
+            order_line_specs=order_line_specs,
+        )
         operations.append(OperationResult(name="order-ready", resource_id=order_id))
 
     elif task_type == TaskType.CREATE_INVOICE:
@@ -493,6 +522,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         product_spec = dict(related.get("product", {}))
         invoice_spec = dict(related.get("invoice", {}))
         order_spec = dict(related.get("order", {}))
+        order_line_specs = _extract_order_line_specs(related)
         if invoice_spec.get("description") and "description" not in product_spec:
             product_spec["description"] = invoice_spec["description"]
         if order_spec.get("description") and "description" not in product_spec:
@@ -509,10 +539,18 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             raise TripletexClientError("Invoice requires resolvable customer")
         product_id = (
             _resolve_product(client, product_spec, operations, allow_create=False)
-            if _should_resolve_product_for_order_line(product_spec)
+            if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
             else None
         )
-        order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
+        order_id = _create_order(
+            client,
+            customer_id,
+            product_id,
+            fields,
+            product_spec,
+            operations,
+            order_line_specs=order_line_specs,
+        )
         _create_invoice_with_fallback(
             client,
             fields,

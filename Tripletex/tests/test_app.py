@@ -832,3 +832,41 @@ def test_solve_create_multiple_departments() -> None:
     assert response.status_code == 200
     assert [item["name"] for item in recorded["department_payloads"]] == ["Utvikling", "Innkjøp", "Økonomi"]
     app.dependency_overrides.clear()
+def test_solve_payment_reversal_prompt_creates_outstanding_invoice() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Betalinga frÃ¥ Strandvik AS (org.nr 859256333) for fakturaen "Nettverksteneste" (41550 kr ekskl. MVA) vart returnert av banken. Reverser betalinga slik at fakturaen igjen viser utestÃ¥ande belÃ¸p.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Nettverksteneste"
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "paymentDate" not in recorded["invoice_payload"]
+    app.dependency_overrides.clear()
+
+
+def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_lines() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Erstellen Sie einen Auftrag fÃ¼r den Kunden Waldstein GmbH (Org.-Nr. 899060113) mit den Produkten Netzwerkdienst (5411) zu 29200 NOK und Schulung (7883) zu 10350 NOK. Wandeln Sie den Auftrag in eine Rechnung um und registrieren Sie die vollstÃ¤ndige Zahlung.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert len(recorded["order_payload"]["orderLines"]) == 2
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
+    assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 39550.0
+    app.dependency_overrides.clear()

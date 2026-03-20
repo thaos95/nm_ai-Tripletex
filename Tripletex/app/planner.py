@@ -2,6 +2,8 @@ from app.schemas import ExecutionPlan, ParsedTask, PlannedStep, TaskType
 
 
 def _invoice_requires_product_resolution(parsed_task: ParsedTask) -> bool:
+    if any(key.startswith("order_line_") for key in parsed_task.related_entities):
+        return False
     product_spec = parsed_task.related_entities.get("product", {})
     if product_spec.get("description"):
         return False

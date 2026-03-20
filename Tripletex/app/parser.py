@@ -114,6 +114,20 @@ PAYMENT_TOKENS = [
     "bezahlen",
 ]
 
+PAYMENT_REVERSAL_TOKENS = [
+    "reverse payment",
+    "reverser betaling",
+    "reverser betalinga",
+    "reverser betalingen",
+    "returned by the bank",
+    "returnert av banken",
+    "returned payment",
+    "reverse the payment",
+    "utestaande belop",
+    "utestaende belop",
+    "outstanding amount",
+]
+
 
 INTENT_THRESHOLDS = {
     "supplier_customer": 6,
@@ -162,6 +176,10 @@ def _contains_send_invoice_intent(text: str) -> bool:
 
 def _contains_payment_intent(text: str) -> bool:
     return _contains_any(text, PAYMENT_TOKENS)
+
+
+def _contains_payment_reversal_intent(text: str) -> bool:
+    return _contains_any(text, PAYMENT_REVERSAL_TOKENS)
 
 
 def _normalized_text(text: str) -> str:
@@ -380,9 +398,22 @@ def _extract_labeled_amount(prompt: str) -> Optional[float]:
     return _extract_amount(prompt)
 
 
+def _extract_invoice_customer_name(prompt: str) -> Optional[str]:
+    patterns = [
+        r"(?:kunden|kunde|customer|client|cliente)\s+([A-ZÃ†Ã˜Ã…Ã‰ÃœÃ–Ã„][^,(.\n]+)",
+        r"(?:betalinga\s+fr[åa]|betaling\s+fr[åa]|payment\s+from|zahlung\s+von)\s+([A-ZÃ†Ã˜Ã…Ã‰ÃœÃ–Ã„][^,(.\n]+)",
+        r"(?:for)\s+([A-ZÃ†Ã˜Ã…Ã‰ÃœÃ–Ã„][^,(.\n]+)\s+\((?:Org|org)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return _extract_project_customer_name(prompt)
+
+
 def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     related_entities = {}
-    customer_name = _extract_project_customer_name(prompt)
+    customer_name = _extract_invoice_customer_name(prompt)
     product_name = _extract_named_entity(prompt, ["produkt", "product", "producto", "produto"])
     if customer_name:
         related_entities["customer"] = {"name": customer_name, "isCustomer": True}
@@ -663,6 +694,45 @@ def _extract_invoice_description_fallback(prompt: str) -> Optional[str]:
     return None
 
 
+def _extract_order_line_specs(prompt: str) -> List[Dict[str, object]]:
+    specs: List[Dict[str, object]] = []
+    patterns = [
+        re.compile(
+            r'([A-ZÃ†Ã˜Ã…Ã‰ÃœÃ–Ã„][\wÃ†Ã˜Ã…Ã¦Ã¸Ã¥Ã‰Ã©ÃœÃ¼Ã–Ã¶Ã„Ã¤ .\-]+?)\s*\((\d{3,})\)\s*(?:zu|for|por|a|til|à)\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b',
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r'["\']([^"\']+)["\']\s*\((\d{3,})\)\s*(?:zu|for|por|a|til|à)\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b',
+            re.IGNORECASE,
+        ),
+    ]
+    for pattern in patterns:
+        for match in pattern.finditer(prompt):
+            name = _clean_name(match.group(1))
+            name = re.sub(
+                r"^(?:mit den produkten|mit dem produkt|med produktene|med produktet|with the products|with product)\s+",
+                "",
+                name,
+                flags=re.IGNORECASE,
+            )
+            name = re.sub(r"^(?:und|and|og|e)\s+", "", name, flags=re.IGNORECASE)
+            product_number = match.group(2)
+            amount = float(match.group(3).replace(",", "."))
+            if not name:
+                continue
+            specs.append(
+                {
+                    "name": name,
+                    "description": name,
+                    "productNumber": product_number,
+                    "priceExcludingVatCurrency": amount,
+                }
+            )
+        if specs:
+            break
+    return specs
+
+
 def _score_intents(lowered: str) -> Dict[str, int]:
     scores: Dict[str, int] = {}
 
@@ -807,6 +877,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         ]
     )
     payment_detected = _contains_payment_intent(lowered)
+    payment_reversal_detected = _contains_payment_reversal_intent(lowered)
     invoice_context_detected = any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"])
     if supplier_detected:
         entity = "customer"
@@ -827,13 +898,14 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         entity = "ledger_posting"
     if "kontoplan" in lowered or "ledger account" in lowered or "chart of accounts" in lowered:
         entity = "ledger_account"
-    if not supplier_detected and payment_detected and invoice_context_detected:
+    if not supplier_detected and (payment_detected or payment_reversal_detected) and invoice_context_detected:
         entity = "invoice"
         action = "create"
     if not supplier_detected and invoice_context_detected and (
         any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "registrer"])
         or _contains_send_invoice_intent(lowered)
         or payment_detected
+        or payment_reversal_detected
     ):
         entity = "invoice"
         action = "create"
@@ -1333,7 +1405,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         fields["orderDate"] = fields.get("date") or _today_iso()
         fields["deliveryDate"] = fields.get("date") or fields["orderDate"]
         related_entities = _extract_invoice_entities(prompt)
-        amount = _extract_amount(prompt)
+        order_line_specs = _extract_order_line_specs(prompt)
+        if order_line_specs:
+            for index, spec in enumerate(order_line_specs, start=1):
+                related_entities["order_line_{0}".format(index)] = spec
+            fields["amount"] = round(sum(float(spec["priceExcludingVatCurrency"]) for spec in order_line_specs), 2)
+        amount = fields.get("amount") if fields.get("amount") is not None else _extract_amount(prompt)
         if amount is not None and "product" in related_entities:
             related_entities["product"]["priceExcludingVatCurrency"] = amount
         description = _extract_invoice_description(prompt)
@@ -1341,6 +1418,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             description = _extract_invoice_description_fallback(prompt)
         if description:
             related_entities.setdefault("order", {})["description"] = description
+        elif order_line_specs:
+            related_entities.setdefault("order", {})["description"] = str(order_line_specs[0]["description"])
         return ParsedTask(
             task_type=TaskType.CREATE_ORDER,
             confidence=0.74,
@@ -1355,7 +1434,13 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         fields["orderDate"] = fields["invoiceDate"]
         fields["deliveryDate"] = fields["invoiceDate"]
         related_entities = _extract_invoice_entities(prompt)
-        amount = _extract_amount(prompt)
+        order_line_specs = _extract_order_line_specs(prompt)
+        if order_line_specs:
+            for index, spec in enumerate(order_line_specs, start=1):
+                related_entities["order_line_{0}".format(index)] = spec
+            amount = round(sum(float(spec["priceExcludingVatCurrency"]) for spec in order_line_specs), 2)
+        else:
+            amount = _extract_amount(prompt)
         if amount is not None:
             fields["amount"] = amount
             if "product" in related_entities:
@@ -1368,7 +1453,11 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if description:
             related_entities.setdefault("invoice", {})["description"] = description
             related_entities.setdefault("order", {})["description"] = description
-        if payment_detected:
+        elif order_line_specs:
+            combined_description = ", ".join(str(spec["description"]) for spec in order_line_specs)
+            related_entities.setdefault("invoice", {})["description"] = combined_description
+            related_entities.setdefault("order", {})["description"] = combined_description
+        if payment_detected and not payment_reversal_detected:
             fields["markAsPaid"] = True
             fields["paymentDate"] = fields["invoiceDate"]
             if amount is not None:

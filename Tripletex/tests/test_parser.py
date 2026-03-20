@@ -200,3 +200,25 @@ def test_parse_multi_department_prompt() -> None:
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_DEPARTMENT
     assert validated.parsed_task.fields["departmentNames"] == "Utvikling||Innkjøp||Økonomi"
+def test_parse_payment_reversal_prompt_keeps_invoice_unpaid() -> None:
+    parsed = parse_prompt(
+        'Betalinga frÃ¥ Strandvik AS (org.nr 859256333) for fakturaen "Nettverksteneste" (41550 kr ekskl. MVA) vart returnert av banken. Reverser betalinga slik at fakturaen igjen viser utestÃ¥ande belÃ¸p.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert "markAsPaid" not in validated.parsed_task.fields
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "859256333"
+    assert validated.parsed_task.related_entities["order"]["description"] == "Nettverksteneste"
+
+
+def test_parse_multiline_order_invoice_prompt_collects_all_order_lines() -> None:
+    parsed = parse_prompt(
+        'Erstellen Sie einen Auftrag fÃ¼r den Kunden Waldstein GmbH (Org.-Nr. 899060113) mit den Produkten Netzwerkdienst (5411) zu 29200 NOK und Schulung (7883) zu 10350 NOK. Wandeln Sie den Auftrag in eine Rechnung um und registrieren Sie die vollstÃ¤ndige Zahlung.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "899060113"
+    assert validated.parsed_task.related_entities["order_line_1"]["description"] == "Netzwerkdienst"
+    assert validated.parsed_task.related_entities["order_line_2"]["description"] == "Schulung"
+    assert validated.parsed_task.fields["amount"] == 39550.0
+    assert validated.parsed_task.fields["amountPaidCurrency"] == 39550.0
