@@ -165,12 +165,17 @@ SUPPLIER_INVOICE_TOKENS = [
     "vendor invoice",
     "leverandorfaktura",
     "leverandorfakturaen",
+    "lieferantenrechnung",
+    "lieferant enrechnung",
     "received invoice",
     "mottatt faktura",
     "inngaende faktura",
     "incoming invoice",
     "input vat",
     "inngaende mva",
+    "vorsteuer",
+    "einschliesslich mwst",
+    "einschlie lich mwst",
 ]
 
 
@@ -916,6 +921,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         _contains_supplier_invoice_intent(lowered)
         or ("invoice" in lowered and any(token in lowered for token in ["including vat", "input vat", "office services", "account "]))
         or ("faktura" in lowered and any(token in lowered for token in ["inkludert mva", "inngaende mva", "konto "]))
+        or ("rechnung" in lowered and any(token in lowered for token in ["erhalten", "mwst", "vorsteuer", "konto "]))
     )
     payment_detected = any(
         token in lowered
@@ -1422,10 +1428,11 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if amount is not None:
             fields["amount"] = amount
         return ParsedTask(
-            task_type=TaskType.CREATE_DIMENSION_VOUCHER,
-            confidence=0.74,
+            task_type=TaskType.UNSUPPORTED,
+            confidence=0.96,
             language_hint=_language_hint(prompt),
             fields=fields,
+            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: custom accounting dimension workflows are not available via the configured endpoints"],
         )
 
     if payroll_detected:
@@ -1569,8 +1576,26 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
 def parse_prompt(prompt: str) -> ParsedTask:
     prompt = _repair_mojibake(prompt)
-    llm_parsed = parse_prompt_with_llm(prompt)
     rule_based = parse_prompt_rule_based(prompt)
+    if rule_based.task_type == TaskType.UNSUPPORTED and rule_based.confidence >= 0.9:
+        return rule_based
+    if rule_based.task_type in {
+        TaskType.CREATE_EMPLOYEE,
+        TaskType.UPDATE_EMPLOYEE,
+        TaskType.LIST_EMPLOYEES,
+        TaskType.CREATE_CUSTOMER,
+        TaskType.UPDATE_CUSTOMER,
+        TaskType.SEARCH_CUSTOMERS,
+        TaskType.CREATE_PRODUCT,
+        TaskType.CREATE_DEPARTMENT,
+        TaskType.DELETE_TRAVEL_EXPENSE,
+        TaskType.UPDATE_TRAVEL_EXPENSE,
+        TaskType.LIST_LEDGER_ACCOUNTS,
+        TaskType.LIST_LEDGER_POSTINGS,
+    } and rule_based.confidence >= 0.84:
+        return rule_based
+
+    llm_parsed = parse_prompt_with_llm(prompt)
     specialized_rule_tasks = {
         TaskType.CREATE_TRAVEL_EXPENSE,
         TaskType.CREATE_CREDIT_NOTE,

@@ -1,7 +1,7 @@
 from datetime import date
 
 import app.parser as parser_module
-
+from app.schemas import ParsedTask
 from app.parser import parse_prompt
 from app.schemas import TaskType
 from app.validator import validate_and_normalize_task
@@ -126,6 +126,25 @@ def test_parse_supplier_invoice_prompt_is_unsupported() -> None:
     )
     assert parsed.task_type == TaskType.UNSUPPORTED
     assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in parsed.notes[0]
+
+
+def test_parse_german_supplier_invoice_prompt_is_unsupported() -> None:
+    parsed = parse_prompt(
+        "Wir haben die Rechnung INV-2026-8810 vom Lieferanten Sonnental GmbH (Org.-Nr. 988926221) über 8050 NOK einschließlich MwSt. erhalten. Der Betrag betrifft Bürodienstleistungen (Konto 6860). Erfassen Sie die Lieferantenrechnung mit der korrekten Vorsteuer (25 %)."
+    )
+    assert parsed.task_type == TaskType.UNSUPPORTED
+    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in parsed.notes[0]
+
+
+def test_parse_unsupported_fast_path_skips_llm(monkeypatch) -> None:
+    def fail_llm(prompt: str) -> ParsedTask:
+        raise AssertionError("LLM should not be called for high-confidence unsupported prompts")
+
+    monkeypatch.setattr(parser_module, "parse_prompt_with_llm", fail_llm)
+    parsed = parse_prompt(
+        "We have received invoice INV-2026-9601 from the supplier Oakwood Ltd (org no. 967247049) for 79750 NOK including VAT. The amount relates to office services (account 6540). Register the supplier invoice with the correct input VAT (25%)."
+    )
+    assert parsed.task_type == TaskType.UNSUPPORTED
 
 
 def test_parse_employee_with_birth_and_start_dates() -> None:
