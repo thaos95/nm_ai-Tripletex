@@ -12,6 +12,30 @@ def _extract_id(response: Dict[str, Any]) -> Optional[int]:
     return response.get("id")
 
 
+def _verify_resource_exists(client: TripletexClient, resource: str, resource_id: Optional[int], operations: list, operation_name: str) -> None:
+    if resource_id is None:
+        operations.append(OperationResult(name="{0}-verify".format(operation_name), payload={"verified": False, "reason": "missing-id"}))
+        return
+    try:
+        resource_payload = client.find_by_id(resource, int(resource_id))
+    except TripletexClientError as exc:
+        operations.append(
+            OperationResult(
+                name="{0}-verify".format(operation_name),
+                resource_id=int(resource_id),
+                payload={"verified": False, "reason": str(exc)},
+            )
+        )
+        return
+    operations.append(
+        OperationResult(
+            name="{0}-verify".format(operation_name),
+            resource_id=int(resource_id),
+            payload={"verified": bool(resource_payload), "resource": resource_payload},
+        )
+    )
+
+
 def _compact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return dict((key, value) for key, value in payload.items() if value is not None)
 
@@ -57,6 +81,10 @@ def _build_product_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     if spec.get("priceExcludingVatCurrency") is not None:
         payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
     return _compact_payload(payload)
+
+
+def _build_ledger_account_payload(number: str, name: str) -> Dict[str, Any]:
+    return _compact_payload({"number": int(number), "name": name})
 
 
 def _can_create_product_prerequisite(spec: Dict[str, Any]) -> bool:
@@ -311,6 +339,43 @@ def _resolve_department(client: TripletexClient, operations: list) -> Optional[i
     return department_id
 
 
+def _resolve_ledger_account(
+    client: TripletexClient,
+    account_number: str,
+    operations: list,
+    *,
+    create_name: str = "Salgsinntekt",
+) -> Optional[str]:
+    try:
+        existing = client.find_single("ledger/account", {"number": account_number}, fields="id,number,name")
+    except TripletexClientError as exc:
+        if "404" in str(exc) or "/ledger/account" in str(exc):
+            operations.append(OperationResult(name="skip-ledger-account", payload={"reason": "endpoint-unavailable"}))
+            return None
+        raise
+    if existing:
+        resolved_number = str(existing.get("number") or account_number)
+        operations.append(
+            OperationResult(
+                name="resolve-ledger-account",
+                resource_id=existing.get("id"),
+                payload=existing,
+            )
+        )
+        return resolved_number
+    operations.append(
+        OperationResult(
+            name="missing-ledger-account",
+            payload={
+                "reason": "not-found",
+                "accountNumber": account_number,
+                "supportedAction": "GET /ledger/account",
+            },
+        )
+    )
+    return None
+
+
 def _create_order(
     client: TripletexClient,
     customer_id: int,
@@ -319,6 +384,7 @@ def _create_order(
     product_spec: Dict[str, Any],
     operations: list,
     order_line_specs: Optional[list] = None,
+    ledger_account_number: Optional[str] = None,
 ) -> Optional[int]:
     order_lines = []
     if order_line_specs:
@@ -332,6 +398,8 @@ def _create_order(
         line = {}
         if product_id is not None:
             line["product"] = {"id": product_id}
+        elif ledger_account_number:
+            line["account"] = {"number": ledger_account_number}
         description = product_spec.get("description") or parsed_fields.get("description")
         if description:
             line["description"] = description
@@ -560,6 +628,13 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
                 else None
             )
+        ledger_account_number = None
+        if not order_line_specs and product_id is None:
+            ledger_account_number = _resolve_ledger_account(
+                client,
+                str(fields.get("accountNumber") or "3000"),
+                operations,
+            )
         existing_order_id = order_spec.get("id")
         if existing_order_id is not None:
             order_id = int(existing_order_id)
@@ -573,6 +648,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 product_spec,
                 operations,
                 order_line_specs=order_line_specs,
+                ledger_account_number=ledger_account_number,
             )
         _create_invoice_with_fallback(
             client,

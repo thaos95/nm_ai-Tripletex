@@ -225,6 +225,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "orderDate",
             "deliveryDate",
             "amount",
+            "accountNumber",
             "sendByEmail",
             "markAsPaid",
             "paymentDate",

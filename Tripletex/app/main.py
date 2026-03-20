@@ -11,7 +11,8 @@ from app.logging_utils import get_logger
 from app.parser import parse_prompt
 from app.planner import build_plan
 from app.prompt_lab import prompt_lab_page
-from app.schemas import InspectRequest, InspectResponse, SolveRequest, SolveResponse, TaskType
+from app.preflight import validate_preflight
+from app.schemas import InspectRequest, InspectResponse, SolveRequest, SolveResponse, TaskType, ValidateRequest, ValidateResponse
 from app.task_contracts import get_task_contract
 from app.validator import validate_and_normalize_task
 from app.workflow import build_workflow_plan, execute_workflow, parse_workflow
@@ -91,6 +92,21 @@ def inspect_prompt(request: InspectRequest) -> InspectResponse:
         safety=validation.safety,
         blocking_error=validation.blocking_error,
     )
+
+
+@app.post("/validate", response_model=ValidateResponse, dependencies=[Depends(require_api_key)])
+def validate_request(
+    request: ValidateRequest,
+    transport: Optional[httpx.BaseTransport] = Depends(get_client_transport),
+) -> ValidateResponse:
+    parsing_input = build_parsing_input(request.prompt, request.files)
+    parsed_task = parse_prompt(parsing_input)
+    validation = validate_and_normalize_task(parsed_task)
+    client = get_tripletex_client(request, transport)
+    try:
+        return validate_preflight(client, validation.parsed_task)
+    finally:
+        client.close()
 
 
 @app.post("/solve", response_model=SolveResponse, dependencies=[Depends(require_api_key)])

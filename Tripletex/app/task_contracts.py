@@ -41,7 +41,7 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
     ),
     TaskType.CREATE_INVOICE: TaskContract(
         task_type=TaskType.CREATE_INVOICE,
-        allowed_endpoints=["/customer", "/product", "/order", "/invoice"],
+        allowed_endpoints=["/customer", "/product", "/ledger/account", "/order", "/invoice"],
         prerequisites=["customer", "order line source"],
         recoverable_errors=[
             TripletexErrorCategory.NO_RESULTS,

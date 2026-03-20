@@ -13,6 +13,9 @@ def retry_transport(recorded: dict) -> httpx.MockTransport:
         if request.method == "GET" and request.url.path == "/v2/customer":
             return httpx.Response(200, json={"values": [{"id": 2001, "name": "Brattli AS"}]})
 
+        if request.method == "GET" and request.url.path == "/v2/ledger/account":
+            return httpx.Response(200, json={"values": [{"id": 3501, "number": 3000, "name": "Salgsinntekt"}]})
+
         if request.method == "POST" and request.url.path == "/v2/order":
             return httpx.Response(200, json={"value": {"id": 5001}})
 
@@ -43,6 +46,9 @@ def bank_error_transport(recorded: dict) -> httpx.MockTransport:
 
         if request.method == "GET" and request.url.path == "/v2/customer":
             return httpx.Response(200, json={"values": [{"id": 2001, "name": "Brattli AS"}]})
+
+        if request.method == "GET" and request.url.path == "/v2/ledger/account":
+            return httpx.Response(200, json={"values": [{"id": 3501, "number": 3000, "name": "Salgsinntekt"}]})
 
         if request.method == "POST" and request.url.path == "/v2/order":
             return httpx.Response(200, json={"value": {"id": 5001}})
@@ -83,6 +89,7 @@ def test_create_invoice_retries_once_with_minimal_payload_on_generic_422() -> No
     assert response.status_code == 200
     assert recorded["calls"] == [
         "GET /v2/customer",
+        "GET /v2/ledger/account",
         "POST /v2/order",
         "POST /v2/invoice",
         "POST /v2/invoice",
@@ -110,9 +117,10 @@ def test_create_invoice_does_not_retry_on_bank_account_validation_error() -> Non
         },
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 200
     assert recorded["calls"] == [
         "GET /v2/customer",
+        "GET /v2/ledger/account",
         "POST /v2/order",
         "POST /v2/invoice",
     ]

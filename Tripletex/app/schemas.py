@@ -145,3 +145,24 @@ class OperationResult(BaseModel):
 class ExecutionResult(BaseModel):
     task_type: TaskType
     operations: List[OperationResult] = Field(default_factory=list)
+
+
+class ValidateRequest(SolveRequest):
+    pass
+
+
+class ValidationCheck(BaseModel):
+    name: str
+    result: str
+    code: Optional[str] = None
+    message: str
+    suggested_action: Optional[str] = None
+    endpoint: Optional[str] = None
+
+
+class ValidateResponse(BaseModel):
+    status: str
+    operation: str
+    checks: List[ValidationCheck] = Field(default_factory=list)
+    summary: str
+    can_continue: bool

@@ -452,11 +452,14 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     related_entities = {}
     customer_name = _extract_invoice_customer_name(prompt)
     product_name = _extract_named_entity(prompt, ["produkt", "product", "producto", "produto"])
+    customer_email = _first_match(EMAIL_RE, prompt)
     if customer_name:
         related_entities["customer"] = {"name": customer_name, "isCustomer": True}
         org_number = _extract_org_number(prompt)
         if org_number:
             related_entities["customer"]["organizationNumber"] = org_number
+        if customer_email:
+            related_entities["customer"]["email"] = customer_email
     if product_name:
         related_entities["product"] = {"name": product_name}
     return related_entities

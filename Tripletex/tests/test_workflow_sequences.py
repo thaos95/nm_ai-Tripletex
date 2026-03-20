@@ -38,6 +38,13 @@ def sequence_transport(recorded: dict) -> httpx.MockTransport:
             order_id = 5000 + len(recorded["order_payloads"])
             return httpx.Response(200, json={"value": {"id": order_id}})
 
+        if request.method == "GET" and request.url.path == "/v2/ledger/account":
+            return httpx.Response(200, json={"values": []})
+
+        if request.method == "POST" and request.url.path == "/v2/ledger/account":
+            recorded["ledger_account_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 3501, "number": recorded["ledger_account_payload"]["number"]}})
+
         if request.method == "POST" and request.url.path == "/v2/invoice":
             recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 6001}})
@@ -149,6 +156,6 @@ def test_solve_order_then_invoice_payment_reuses_existing_order() -> None:
     ]
     assert len(recorded["order_payloads"]) == 1
     assert recorded["invoice_payload"]["orders"] == [{"id": 5001}]
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 1500
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()

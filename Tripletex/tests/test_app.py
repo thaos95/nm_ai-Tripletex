@@ -851,6 +851,69 @@ def test_solve_payment_reversal_prompt_creates_outstanding_invoice() -> None:
     app.dependency_overrides.clear()
 
 
+def test_solve_create_invoice_creates_customer_before_ledger_account_when_customer_missing() -> None:
+    recorded = {}
+
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+
+            if request.method == "GET" and request.url.path == "/v2/customer":
+                return httpx.Response(200, json={"values": []})
+
+            if request.method == "POST" and request.url.path == "/v2/customer":
+                recorded["customer_payload"] = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(200, json={"value": {"id": 2009}})
+
+            if request.method == "GET" and request.url.path == "/v2/product":
+                return httpx.Response(200, json={"values": []})
+
+            if request.method == "GET" and request.url.path == "/v2/ledger/account":
+                return httpx.Response(200, json={"values": [{"id": 3501, "number": 3000, "name": "Salgsinntekt"}]})
+
+            if request.method == "POST" and request.url.path == "/v2/order":
+                recorded["order_payload"] = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(200, json={"value": {"id": 5009}})
+
+            if request.method == "POST" and request.url.path == "/v2/invoice":
+                recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(200, json={"value": {"id": 6009}})
+
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Opprett og send en faktura til kunden Test Kunde AS (org.nr 123456789) med e-post post@testkunde.no på 7250 kr eksklusiv MVA. Fakturaen gjelder Konsulentbistand.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert recorded["calls"] == [
+        "GET /v2/customer",
+        "POST /v2/customer",
+        "GET /v2/ledger/account",
+        "POST /v2/order",
+        "POST /v2/invoice",
+    ]
+    assert recorded["customer_payload"] == {
+        "name": "Test Kunde AS",
+        "email": "post@testkunde.no",
+        "isCustomer": True,
+        "organizationNumber": "123456789",
+    }
+    assert recorded["order_payload"]["customer"]["id"] == 2009
+    assert recorded["order_payload"]["orderLines"][0]["account"]["number"] == "3000"
+    assert recorded["invoice_payload"]["customer"]["id"] == 2009
+    app.dependency_overrides.clear()
+
+
 def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_lines() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
@@ -869,4 +932,87 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert "amountPaidCurrency" not in recorded["invoice_payload"]
+    app.dependency_overrides.clear()
+
+
+def test_validate_reports_customer_not_found_before_invoice_creation() -> None:
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == "/v2/customer":
+                return httpx.Response(200, json={"values": []})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/validate",
+        json={
+            "prompt": "Opprett og send en faktura til kunden Test Kunde AS (org.nr 123456789) på 7250 kr eksklusiv MVA. Fakturaen gjelder Konsulentbistand.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "AVVIK"
+    assert body["operation"] == "Opprette faktura"
+    assert body["checks"][0]["code"] == "CUSTOMER_NOT_FOUND"
+    assert body["checks"][0]["suggested_action"] == "POST /customer"
+    assert body["checks"][0]["endpoint"] == "/customer"
+    assert body["can_continue"] is False
+    app.dependency_overrides.clear()
+
+
+def test_validate_reports_ledger_account_missing_when_not_confirmed() -> None:
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == "/v2/customer":
+                return httpx.Response(200, json={"values": [{"id": 2001, "name": "Acme AS"}]})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/validate",
+        json={
+            "prompt": "Opprett og send en faktura til kunden Acme AS (org.nr 123456789) på 7250 kr eksklusiv MVA. Fakturaen gjelder Konsulentbistand.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert any(check["code"] == "LEDGER_ACCOUNT_MISSING" for check in body["checks"])
+    assert body["can_continue"] is False
+    app.dependency_overrides.clear()
+
+
+def test_validate_reports_employment_missing_for_period() -> None:
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == "/v2/employee":
+                return httpx.Response(200, json={"values": [{"id": 1001, "firstName": "Ola", "lastName": "Nordmann", "email": "ola@example.org", "employments": []}]})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/validate",
+        json={
+            "prompt": "Run payroll for Ola Nordmann (ola@example.org) for this month. The base salary is 35000 NOK.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "AVVIK"
+    assert any(check["code"] == "EMPLOYMENT_MISSING_FOR_PERIOD" for check in body["checks"])
+    assert body["can_continue"] is False
     app.dependency_overrides.clear()
