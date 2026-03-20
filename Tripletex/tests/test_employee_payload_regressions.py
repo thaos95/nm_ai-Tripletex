@@ -35,3 +35,23 @@ def test_solve_create_employee_omits_proxy_invalid_start_date_field() -> None:
     assert recorded["employee_payload"]["dateOfBirth"] == "1990-03-06"
     assert "dateFrom" not in recorded["employee_payload"]
     app.dependency_overrides.clear()
+
+
+def test_solve_create_product_omits_proxy_invalid_number_and_vat_fields() -> None:
+    recorded: dict = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Create the product "Training Session" with product number 2451. The price is 20350 NOK excluding VAT, using the standard 25% VAT rate.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["product_payload"]["name"] == "Training Session"
+    assert recorded["product_payload"]["priceExcludingVatCurrency"] == 20350
+    assert "productNumber" not in recorded["product_payload"]
+    assert "vatPercentage" not in recorded["product_payload"]
+    app.dependency_overrides.clear()

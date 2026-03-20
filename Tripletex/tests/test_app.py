@@ -616,9 +616,10 @@ def test_solve_create_product_preserves_number_and_vat() -> None:
         },
     )
     assert response.status_code == 200
-    assert recorded["product_payload"]["vatPercentage"] == 15.0
     assert recorded["product_payload"]["name"] == "Havregryn"
+    assert recorded["product_payload"]["priceExcludingVatCurrency"] == 29250
     assert "productNumber" not in recorded["product_payload"]
+    assert "vatPercentage" not in recorded["product_payload"]
     app.dependency_overrides.clear()
 
 

@@ -18,8 +18,6 @@ def _build_product_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     payload = {"name": spec.get("name")}
     if spec.get("priceExcludingVatCurrency") is not None:
         payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
-    if spec.get("vatPercentage") is not None:
-        payload["vatPercentage"] = spec["vatPercentage"]
     return _compact_payload(payload)
 
 
