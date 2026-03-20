@@ -561,9 +561,9 @@ def test_solve_create_customer_preserves_supplier_and_address_fields() -> None:
     assert response.status_code == 200
     assert recorded["customer_payload"]["isSupplier"] is True
     assert recorded["customer_payload"]["organizationNumber"] == "892196753"
-    assert recorded["customer_payload"]["address"] == "Parkveien 45"
-    assert recorded["customer_payload"]["postalCode"] == "5003"
-    assert recorded["customer_payload"]["city"] == "Bergen"
+    assert "address" not in recorded["customer_payload"]
+    assert "postalCode" not in recorded["customer_payload"]
+    assert "city" not in recorded["customer_payload"]
     app.dependency_overrides.clear()
 
 
@@ -620,6 +620,24 @@ def test_solve_create_invoice_uses_description_when_product_missing() -> None:
     assert recorded["order_payload"]["orderDate"] == "2026-03-19"
     assert recorded["order_payload"]["deliveryDate"] == "2026-03-19"
     assert recorded["invoice_payload"]["sendByEmail"] is True
+    app.dependency_overrides.clear()
+
+
+def test_solve_payment_prompt_is_not_unsupported() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "System Development"
+    assert recorded["invoice_payload"]["invoiceDate"] == "2026-03-19"
     app.dependency_overrides.clear()
 
 

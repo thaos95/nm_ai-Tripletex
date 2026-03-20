@@ -99,9 +99,9 @@ def test_parse_supplier_customer_with_address() -> None:
     assert validated.parsed_task.task_type == TaskType.CREATE_CUSTOMER
     assert validated.parsed_task.fields["isSupplier"] is True
     assert validated.parsed_task.fields["organizationNumber"] == "892196753"
-    assert validated.parsed_task.fields["address"] == "Parkveien 45"
-    assert validated.parsed_task.fields["postalCode"] == "5003"
-    assert validated.parsed_task.fields["city"] == "Bergen"
+    assert validated.parsed_task.related_entities["customer_address"]["address"] == "Parkveien 45"
+    assert validated.parsed_task.related_entities["customer_address"]["postalCode"] == "5003"
+    assert validated.parsed_task.related_entities["customer_address"]["city"] == "Bergen"
 
 
 def test_parse_employee_with_birth_and_start_dates() -> None:
@@ -133,6 +133,18 @@ def test_parse_invoice_with_description_and_dates() -> None:
     assert validated.parsed_task.fields["sendByEmail"] is True
     assert validated.parsed_task.fields["orderDate"] == "2026-03-19"
     assert validated.parsed_task.related_entities["invoice"]["description"] == "Rapport d'analyse"
+
+
+def test_parse_payment_prompt_maps_to_invoice_flow() -> None:
+    parsed = parse_prompt(
+        'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.fields["markAsPaid"] is True
+    assert validated.parsed_task.fields["paymentDate"] == "2026-03-19"
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "830362894"
+    assert validated.parsed_task.related_entities["invoice"]["description"] == "System Development"
 
 
 def test_parse_multi_department_prompt() -> None:

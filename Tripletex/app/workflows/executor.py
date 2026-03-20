@@ -38,7 +38,7 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
         payload["isSupplier"] = spec["isSupplier"]
     if spec.get("isCustomer") is not None:
         payload["isCustomer"] = spec["isCustomer"]
-    for key in ("address", "postalCode", "city", "phoneNumber"):
+    for key in ("phoneNumber",):
         if spec.get(key):
             payload[key] = spec[key]
     response = client.create_resource("customer", _compact_payload(payload))
@@ -196,7 +196,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="list-employees", payload=response))
 
     elif task_type == TaskType.CREATE_CUSTOMER:
-        response = client.create_resource("customer", _compact_payload(fields))
+        payload = {
+            "name": fields.get("name"),
+            "email": fields.get("email"),
+            "isCustomer": fields.get("isCustomer"),
+            "isSupplier": fields.get("isSupplier"),
+            "organizationNumber": fields.get("organizationNumber"),
+            "phoneNumber": fields.get("phoneNumber"),
+        }
+        response = client.create_resource("customer", _compact_payload(payload))
         operations.append(
             OperationResult(name="create-customer", resource_id=_extract_id(response), payload=response)
         )

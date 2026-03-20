@@ -301,6 +301,18 @@ def _extract_employee_name(prompt: str) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 
+def _extract_employee_number(prompt: str) -> Optional[str]:
+    match = re.search(
+        r"(?:employee|ansatt|tilsett|mitarbeiter|funcion[aá]rio)[^@\n]*?\b(\d{8,12})\b",
+        prompt,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+    standalone = re.findall(r"\b\d{8,12}\b", prompt)
+    return standalone[0] if standalone else None
+
+
 def _extract_customer_name(prompt: str) -> Optional[str]:
     customer_name = _extract_project_customer_name(prompt)
     if customer_name:
@@ -363,13 +375,30 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     supplier_detected = any(
         token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant"]
     )
+    payment_detected = any(
+        token in lowered
+        for token in [
+            "register full payment",
+            "full payment",
+            "registe",
+            "registrer full betaling",
+            "betaling",
+            "pago completo",
+            "registre le paiement",
+            "zahlung",
+            "vollstandige zahlung",
+            "vollständige zahlung",
+            "payment on this invoice",
+        ]
+    )
     if supplier_detected:
         entity = "customer"
         action = "create"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
-    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "rechnung"]) and any(
-        token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"]
+    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "rechnung"]) and (
+        any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"])
+        or payment_detected
     ):
         entity = "invoice"
         action = "create"
@@ -404,6 +433,9 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             match_fields["first_name"] = first_name
         if last_name:
             match_fields["last_name"] = last_name
+        employee_number = _extract_employee_number(prompt)
+        if employee_number:
+            match_fields["employeeNumber"] = employee_number
         if "email" in fields:
             match_fields["email"] = fields.pop("email")
         if "phone" in fields:
@@ -437,13 +469,16 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if supplier_detected:
             fields["isSupplier"] = True
             fields["isCustomer"] = False
-        fields.update(_extract_address_fields(prompt))
+        address_fields = _extract_address_fields(prompt)
+        if address_fields:
+            related_entities["customer_address"] = address_fields
         return ParsedTask(
             task_type=TaskType.CREATE_CUSTOMER,
             confidence=0.86,
             language_hint=_language_hint(prompt),
             fields=fields,
             match_fields=match_fields,
+            related_entities=related_entities,
         )
 
     if entity == "customer" and action == "update":

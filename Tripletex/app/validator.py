@@ -70,6 +70,26 @@ def _normalize_customer_fields(task: ParsedTask) -> None:
         task.fields.pop("organizationNumber", None)
 
 
+def _normalize_customer_address_fields(task: ParsedTask) -> None:
+    address_fields = {}
+    for source_key, target_key in (
+        ("address", "address"),
+        ("postalCode", "postalCode"),
+        ("zip", "postalCode"),
+        ("zipCode", "postalCode"),
+        ("city", "city"),
+        ("country", "country"),
+    ):
+        if source_key in task.fields:
+            address_fields[target_key] = task.fields.pop(source_key)
+
+    if not address_fields:
+        return
+
+    customer_address = task.related_entities.setdefault("customer_address", {})
+    customer_address.update(address_fields)
+
+
 def _drop_unknown_fields(task: ParsedTask, allowed_fields: Dict[TaskType, Set[str]]) -> List[str]:
     warnings: List[str] = []
     allowed = allowed_fields.get(task.task_type)
@@ -93,6 +113,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         _normalize_customer_phone(normalized)
     elif normalized.task_type == TaskType.CREATE_CUSTOMER:
         _normalize_customer_fields(normalized)
+        _normalize_customer_address_fields(normalized)
     elif normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         _normalize_travel_expense(normalized)
 
@@ -107,9 +128,6 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "isSupplier",
             "organizationNumber",
             "phoneNumber",
-            "address",
-            "postalCode",
-            "city",
         },
         TaskType.UPDATE_CUSTOMER: {"phoneNumber", "email"},
         TaskType.SEARCH_CUSTOMERS: {"fields", "count"},
@@ -176,7 +194,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             warnings.append("Project creation has no linked customer; this is risky")
 
     if normalized.task_type == TaskType.CREATE_DEPARTMENT:
-        if not normalized.fields.get("name"):
+        if not normalized.fields.get("name") and not normalized.fields.get("departmentNames"):
             return ValidationResult(normalized, blocking_error="Department creation requires department name")
 
     if normalized.task_type in {TaskType.CREATE_ORDER, TaskType.CREATE_INVOICE}:
