@@ -188,9 +188,10 @@ def test_dimension_voucher_workflow_creates_dimension_values_and_voucher() -> No
         "POST /v2/ledger/accountingDimensionValue",
         "POST /v2/ledger/voucher",
     ]
-    assert recorded["dimension_payload"]["description"] == "Marked"
+    assert recorded["dimension_payload"]["dimensionName"] == "Marked"
     assert recorded["dimension_value_payloads"][0]["description"] == "Bedrift"
     assert recorded["voucher_payloads"][0]["postings"][0]["account"]["number"] == "6590"
+    assert recorded["voucher_payloads"][0]["postings"][0]["account"]["name"] == recorded["voucher_payloads"][0]["description"]
     app.dependency_overrides.clear()
 
 
@@ -215,5 +216,6 @@ def test_payroll_voucher_workflow_uses_manual_voucher_fallback() -> None:
     ]
     voucher_payload = recorded["voucher_payloads"][0]
     assert voucher_payload["postings"][0]["account"]["number"] == "5000"
+    assert voucher_payload["postings"][0]["account"]["name"] == voucher_payload["description"]
     assert voucher_payload["postings"][0]["amount"] == 50400.0
     app.dependency_overrides.clear()

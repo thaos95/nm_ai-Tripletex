@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Set
 
 import pytest
@@ -9,6 +10,8 @@ from app.schemas import TaskType
 from app.validator import validate_and_normalize_task
 
 from tests.test_app import recording_transport
+
+TODAY_ISO = date.today().isoformat()
 
 
 @pytest.mark.parametrize(
@@ -65,7 +68,7 @@ from tests.test_app import recording_transport
             (
                 'Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.',
                 TaskType.CREATE_INVOICE,
-                {"invoiceDate": "2026-03-20"},
+                {"invoiceDate": TODAY_ISO},
                 {"customer.organizationNumber": "845762686", "order.description": "Skylagring", "invoice.description": "Skylagring"},
             ),
         (
@@ -110,13 +113,13 @@ def test_hidden_prompt_corpus_parse_and_validate(
         (
             'Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.',
             "invoice_payload",
-            {"invoiceDate": "2026-03-20"},
+            {"invoiceDate": TODAY_ISO},
             {"sendByEmail"},
         ),
         (
             'O cliente Floresta Lda (org. no 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
             "invoice_payment_payload",
-            {"paymentDate": "2026-03-20", "amountPaidCurrency": 30450.0},
+            {"paymentDate": TODAY_ISO, "amountPaidCurrency": 30450.0},
             {"sendByEmail"},
         ),
         (

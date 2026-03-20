@@ -155,7 +155,7 @@ def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
         "paymentDate": fields.get("paymentDate"),
         "paidAmount": fields.get("amountPaidCurrency"),
         "amountPaidCurrency": fields.get("amountPaidCurrency"),
-        "paymentTypeId": fields.get("paymentTypeId", 0),
+        "paymentTypeId": fields.get("paymentTypeId", 6),
     }
     return _compact_payload(payload)
 
@@ -168,7 +168,7 @@ def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: Trip
 
 
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
-    return _compact_payload({"description": fields.get("dimensionName")})
+    return _compact_payload({"dimensionName": fields.get("dimensionName")})
 
 
 def _build_dimension_value_payload(dimension_id: int, value_name: str) -> Dict[str, Any]:
@@ -183,7 +183,7 @@ def _build_voucher_payload(
     dimension_value_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     debit_line: Dict[str, Any] = {
-        "account": {"number": account_number},
+        "account": {"number": account_number, "name": description},
         "amount": abs(amount),
         "description": description,
     }
@@ -191,7 +191,7 @@ def _build_voucher_payload(
         debit_line["dimensions"] = [{"id": dimension_value_id}]
 
     credit_line: Dict[str, Any] = {
-        "account": {"number": "2400"},
+        "account": {"number": "2400", "name": "Offset posting"},
         "amount": -abs(amount),
         "description": description,
     }

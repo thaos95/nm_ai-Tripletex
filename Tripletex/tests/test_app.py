@@ -779,7 +779,9 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payment_payload"]["paidAmount"] == 32200.0
     assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 32200.0
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
     app.dependency_overrides.clear()
 
 
@@ -800,7 +802,9 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payment_payload"]["paidAmount"] == 30450.0
     assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 30450.0
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
     app.dependency_overrides.clear()
 
 
@@ -934,7 +938,9 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
     assert "markAsPaid" not in recorded["invoice_payload"]
+    assert recorded["invoice_payment_payload"]["paidAmount"] == 39550.0
     assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 39550.0
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
     app.dependency_overrides.clear()
 
 
@@ -1111,7 +1117,7 @@ def test_solve_dimension_voucher_uses_stable_ledger_dimension_endpoints() -> Non
         "POST /v2/ledger/accountingDimensionValue",
         "POST /v2/ledger/voucher",
     ]
-    assert recorded["dimension_payload"]["description"] == "Marked"
+    assert recorded["dimension_payload"]["dimensionName"] == "Marked"
     assert recorded["dimension_value_payloads"][0]["description"] == "Bedrift"
     app.dependency_overrides.clear()
 
