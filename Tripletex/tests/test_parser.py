@@ -52,6 +52,15 @@ def test_parse_delete_travel_expense_prompt() -> None:
     assert parsed.fields["travel_expense_id"] == 42
 
 
+def test_parse_update_travel_expense_prompt() -> None:
+    parsed = parse_prompt("Oppdater reiseregning 42 med beløp 950 og dato 2026-03-19")
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.UPDATE_TRAVEL_EXPENSE
+    assert validated.parsed_task.fields["travel_expense_id"] == 42
+    assert validated.parsed_task.fields["amount"] == 950.0
+    assert validated.parsed_task.fields["date"] == "2026-03-19"
+
+
 def test_parse_create_project_with_customer_and_org_number() -> None:
     parsed = parse_prompt(
         'Create the project "Analysis Oakwood" linked to the customer Oakwood Ltd (org no. 849612913). The project manager is Lucy Taylor (lucy.taylor@example.org).'
@@ -137,7 +146,7 @@ def test_parse_invoice_with_description_and_dates() -> None:
     )
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
-    assert validated.parsed_task.fields["sendByEmail"] is True
+    assert "sendByEmail" not in validated.parsed_task.fields
     assert validated.parsed_task.fields["orderDate"] == TODAY_ISO
     assert validated.parsed_task.related_entities["invoice"]["description"] == "Rapport d'analyse"
 

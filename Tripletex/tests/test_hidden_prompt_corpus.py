@@ -62,12 +62,12 @@ from tests.test_app import recording_transport
             {"productNumber": "7855", "vatPercentage": 25.0, "priceExcludingVatCurrency": 41550.0},
             {},
         ),
-        (
-            'Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.',
-            TaskType.CREATE_INVOICE,
-            {"sendByEmail": True, "invoiceDate": "2026-03-20"},
-            {"customer.organizationNumber": "845762686", "order.description": "Skylagring", "invoice.description": "Skylagring"},
-        ),
+            (
+                'Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.',
+                TaskType.CREATE_INVOICE,
+                {"invoiceDate": "2026-03-20"},
+                {"customer.organizationNumber": "845762686", "order.description": "Skylagring", "invoice.description": "Skylagring"},
+            ),
         (
             'O cliente Floresta Lda (org. no 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
             TaskType.CREATE_INVOICE,

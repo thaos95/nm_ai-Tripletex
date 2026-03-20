@@ -358,6 +358,28 @@ def _extract_numeric_id(prompt: str) -> Optional[int]:
     return None
 
 
+def _extract_travel_expense_id(prompt: str) -> Optional[int]:
+    match = re.search(
+        r"(?:reiseregning|reiserekning|travel expense|expense report|despesa de viagem)[^\d\n]*?(\d+)",
+        prompt,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _extract_labeled_amount(prompt: str) -> Optional[float]:
+    match = re.search(
+        r"(?:bel[øo]p|amount|sum|belop)[^\d\n]*?(\d+(?:[.,]\d{1,2})?)\s*(?:nok|kr)?",
+        prompt,
+        re.IGNORECASE,
+    )
+    if match:
+        return float(match.group(1).replace(",", "."))
+    return _extract_amount(prompt)
+
+
 def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     related_entities = {}
     customer_name = _extract_project_customer_name(prompt)
@@ -451,6 +473,69 @@ def _extract_customer_name(prompt: str) -> Optional[str]:
         if match:
             return _clean_name(match.group(1))
     return None
+
+
+def _extract_project_customer_name_safe(prompt: str) -> Optional[str]:
+    german_project_billing_match = re.search(
+        r'im\s+projekt\s+[\'"][^\'"]+[\'"]\s+f[uü]r\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)\s+\((?:Org|org)',
+        prompt,
+        re.IGNORECASE,
+    )
+    if german_project_billing_match:
+        return _clean_name(german_project_billing_match.group(1))
+    return _extract_project_customer_name(prompt)
+
+
+def _extract_employee_name_safe(prompt: str) -> Tuple[Optional[str], Optional[str]]:
+    first_name, last_name = _extract_employee_name(prompt)
+    if first_name:
+        return first_name, last_name
+    german_match = re.search(
+        r'(?:f[uü]r)\s+([A-ZÆØÅÉÜÖÄ][\wÆØÅæøåÉéÜüÖöÄä.\-]+(?:\s+[A-ZÆØÅÉÜÖÄ][\wÆØÅæøåÉéÜüÖöÄä.\-]+)+)\s+\(',
+        prompt,
+        re.IGNORECASE,
+    )
+    if german_match:
+        return _split_person_name(_clean_name(german_match.group(1)))
+    return None, None
+
+
+def _extract_activity_name(prompt: str) -> Optional[str]:
+    quoted_match = re.search(
+        r'(?:aktivitet|activity|aktivitat|aktivit[aä]t)\s+["\']([^"\']+)["\']',
+        prompt,
+        re.IGNORECASE,
+    )
+    if quoted_match:
+        return _clean_name(quoted_match.group(1))
+    return _extract_named_entity(prompt, ["aktivitet", "activity", "aktivitat"])
+
+
+def _extract_project_customer_name_billing_safe(prompt: str) -> Optional[str]:
+    normalized_prompt = _normalized_text(prompt)
+    match = re.search(r'im\s+projekt\s+[\'"][^\'"]+[\'"]\s+fur\s+([^,(.\n]+)\s+\((?:org)', normalized_prompt)
+    if match:
+        return _clean_name(match.group(1))
+    return _extract_project_customer_name(prompt)
+
+
+def _extract_employee_name_billing_safe(prompt: str) -> Tuple[Optional[str], Optional[str]]:
+    first_name, last_name = _extract_employee_name(prompt)
+    if first_name:
+        return first_name, last_name
+    normalized_prompt = _normalized_text(prompt)
+    match = re.search(r'(?:fur)\s+([a-z][^(\n]+)\s+\(', normalized_prompt)
+    if not match:
+        return None, None
+    candidate = _clean_name(match.group(1)).title()
+    return _split_person_name(candidate)
+
+
+def _extract_activity_name_safe(prompt: str) -> Optional[str]:
+    match = re.search(r'(?:aktivitet|activity|aktivitat|aktivit.t)\s+["\']([^"\']+)["\']', prompt, re.IGNORECASE)
+    if match:
+        return _clean_name(match.group(1))
+    return _extract_activity_name(prompt)
 
 
 def _extract_product_number(prompt: str) -> Optional[str]:
@@ -844,7 +929,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         action = "create"
     if classified_intent == "travel_expense":
         entity = "travel_expense"
-        action = "create" if action != "delete" else action
+        action = action if action in {"create", "update", "delete"} else "create"
     if classified_intent == "credit_note":
         credit_note_detected = True
         entity = "invoice"
@@ -1008,7 +1093,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             fields["billingPercentage"] = billing_percentage
             if fixed_price_amount is not None:
                 fields["amount"] = round(fixed_price_amount * billing_percentage / 100.0, 2)
-        customer_name = _extract_project_customer_name(prompt)
+        customer_name = _extract_project_customer_name_billing_safe(prompt)
         if customer_name:
             related_entities["customer"] = {"name": customer_name, "isCustomer": True}
             org_number = _extract_org_number(prompt)
@@ -1018,6 +1103,15 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if project_name:
             related_entities["project"] = {"name": project_name}
         manager_name = _extract_project_manager_name_safe(prompt)
+        if not manager_name:
+            employee_first_name, employee_last_name = _extract_employee_name_billing_safe(prompt)
+            if employee_first_name:
+                related_entities["employee"] = {}
+                related_entities["employee"]["first_name"] = employee_first_name
+                if employee_last_name:
+                    related_entities["employee"]["last_name"] = employee_last_name
+                if "email" in fields:
+                    related_entities["employee"]["email"] = fields["email"]
         if manager_name:
             manager_first_name, manager_last_name = _split_person_name(manager_name)
             related_entities["project_manager"] = {}
@@ -1027,7 +1121,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 related_entities["project_manager"]["last_name"] = manager_last_name
             if "email" in fields:
                 related_entities["project_manager"]["email"] = fields["email"]
-        activity_name = _extract_named_entity(prompt, ["aktivitet", "activity", "aktivitat", "aktivität"])
+        activity_name = _extract_activity_name_safe(prompt)
         if activity_name:
             related_entities["activity"] = {"name": activity_name}
         if hours is not None:
@@ -1100,12 +1194,30 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "travel_expense" and action == "delete":
-        identifier = _extract_amount(prompt)
+        identifier = _extract_travel_expense_id(prompt)
         if identifier is not None:
             fields["travel_expense_id"] = int(identifier)
         return ParsedTask(
             task_type=TaskType.DELETE_TRAVEL_EXPENSE,
             confidence=0.8,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+        )
+
+    if entity == "travel_expense" and action == "update":
+        identifier = _extract_travel_expense_id(prompt)
+        if identifier is not None:
+            fields["travel_expense_id"] = int(identifier)
+        amount = _extract_labeled_amount(prompt)
+        if amount is not None:
+            fields["amount"] = amount
+        if "date" in fields:
+            fields["expenseDate"] = fields.pop("date")
+        if "kilometer" in lowered or "km" in lowered:
+            fields["distance"] = int(amount) if amount is not None else 0
+        return ParsedTask(
+            task_type=TaskType.UPDATE_TRAVEL_EXPENSE,
+            confidence=0.74,
             language_hint=_language_hint(prompt),
             fields=fields,
         )
@@ -1256,8 +1368,6 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if description:
             related_entities.setdefault("invoice", {})["description"] = description
             related_entities.setdefault("order", {})["description"] = description
-        if _contains_send_invoice_intent(lowered):
-            fields["sendByEmail"] = True
         if payment_detected:
             fields["markAsPaid"] = True
             fields["paymentDate"] = fields["invoiceDate"]

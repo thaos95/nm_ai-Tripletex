@@ -170,6 +170,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         _normalize_customer_address_fields(normalized)
     elif normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         _normalize_travel_expense(normalized)
+    elif normalized.task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
+        _normalize_travel_expense(normalized)
 
     _normalize_related_entity_aliases(normalized)
 
@@ -238,6 +240,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "email",
         },
         TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "distance"},
+        TaskType.UPDATE_TRAVEL_EXPENSE: {"date", "amount", "distance", "travel_expense_id"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
         TaskType.DELETE_VOUCHER: {"voucher_id"},
         TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
@@ -352,6 +355,15 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         warnings.append("Travel expense flow is still high risk and only lightly validated")
         if "amount" not in normalized.fields:
             return ValidationResult(normalized, blocking_error="Travel expense creation requires amount")
+
+    if normalized.task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
+        warnings.append("Travel expense update flow is still high risk and only lightly validated")
+        if "travel_expense_id" not in normalized.fields:
+            return ValidationResult(normalized, blocking_error="Travel expense update requires expense id")
+        mutable_fields = dict(normalized.fields)
+        mutable_fields.pop("travel_expense_id", None)
+        if not mutable_fields:
+            return ValidationResult(normalized, blocking_error="Travel expense update requires at least one mutable field")
 
     if normalized.task_type == TaskType.DELETE_TRAVEL_EXPENSE and "travel_expense_id" not in normalized.fields:
         warnings.append("Delete travel expense without explicit id will fall back to first available record")

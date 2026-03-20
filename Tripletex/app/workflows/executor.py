@@ -84,6 +84,36 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
     return _compact_payload(payload)
 
 
+def _build_minimal_invoice_payload(
+    fields: Dict[str, Any],
+    customer_id: int,
+    order_id: Optional[int],
+    *,
+    include_due_date: bool = False,
+) -> Dict[str, Any]:
+    payload = {
+        "invoiceDate": fields.get("invoiceDate"),
+        "invoiceDueDate": fields.get("invoiceDueDate") if include_due_date else None,
+        "creditNote": fields.get("creditNote"),
+        "customer": {"id": customer_id},
+        "orders": [{"id": order_id}] if order_id is not None else [],
+    }
+    return _compact_payload(payload)
+
+
+def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
+    message = str(exc).lower()
+    if "bankkontonummer" in message:
+        return False
+    if "bank account" in message:
+        return False
+    if fields.get("markAsPaid"):
+        return False
+    if fields.get("creditNote"):
+        return False
+    return " 422 " in message or "error 422" in message
+
+
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     return _compact_payload({"name": fields.get("dimensionName")})
 
@@ -294,6 +324,38 @@ def _should_resolve_product_for_order_line(product_spec: Dict[str, Any]) -> bool
     return not bool(product_spec.get("description"))
 
 
+def _create_invoice_with_fallback(
+    client: TripletexClient,
+    fields: Dict[str, Any],
+    customer_id: int,
+    order_id: Optional[int],
+    operations: list,
+    *,
+    operation_name: str,
+    minimal_first: bool = False,
+) -> Dict[str, Any]:
+    payload = (
+        _build_minimal_invoice_payload(fields, customer_id, order_id)
+        if minimal_first
+        else _build_invoice_payload(fields, customer_id, order_id)
+    )
+    try:
+        response = client.create_resource("invoice", payload)
+    except TripletexClientError as exc:
+        if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
+            raise
+        fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
+        response = client.create_resource("invoice", fallback_payload)
+        operations.append(
+            OperationResult(
+                name="{0}-retry-minimal".format(operation_name),
+                payload={"invoice": response, "retry": "minimal-payload"},
+            )
+        )
+    operations.append(OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response))
+    return response
+
+
 def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResult:
     task_type = plan.parsed_task.task_type
     fields = dict(plan.parsed_task.fields)
@@ -451,11 +513,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             else None
         )
         order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
-        # Tripletex sandbox may reject invoice creation until company bank settings exist.
-        # Keep the flow narrow and deterministic; rely on logged 422 details if this task appears.
-        invoice_payload = _build_invoice_payload(fields, customer_id, order_id)
-        response = client.create_resource("invoice", invoice_payload)
-        operations.append(OperationResult(name="create-invoice", resource_id=_extract_id(response), payload=response))
+        _create_invoice_with_fallback(
+            client,
+            fields,
+            customer_id,
+            order_id,
+            operations,
+            operation_name="create-invoice",
+        )
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
@@ -475,8 +540,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         if customer_id is None:
             raise TripletexClientError("Credit note requires resolvable customer")
         order_id = _create_order(client, customer_id, None, fields, product_spec, operations)
-        response = client.create_resource("invoice", _build_invoice_payload(fields, customer_id, order_id))
-        operations.append(OperationResult(name="create-credit-note", resource_id=_extract_id(response), payload=response))
+        _create_invoice_with_fallback(
+            client,
+            fields,
+            customer_id,
+            order_id,
+            operations,
+            operation_name="create-credit-note",
+            minimal_first=True,
+        )
 
     elif task_type == TaskType.CREATE_PROJECT_BILLING:
         payload = _build_project_payload(fields)
@@ -515,9 +587,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             {"description": order_description},
             operations,
         )
-        invoice_response = client.create_resource("invoice", _build_invoice_payload(fields, customer_id, order_id))
-        operations.append(
-            OperationResult(name="create-billing-invoice", resource_id=_extract_id(invoice_response), payload=invoice_response)
+        _create_invoice_with_fallback(
+            client,
+            fields,
+            customer_id,
+            order_id,
+            operations,
+            operation_name="create-billing-invoice",
+            minimal_first=True,
         )
 
     elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
@@ -578,6 +655,20 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         response = client.create_resource("travelExpense", _compact_payload(payload))
         operations.append(
             OperationResult(name="create-travel-expense", resource_id=_extract_id(response), payload=response)
+        )
+
+    elif task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
+        expense_id = fields.get("travel_expense_id")
+        if expense_id is None:
+            raise TripletexClientError("Travel expense update requires expense id")
+        payload = dict(fields)
+        payload.pop("travel_expense_id", None)
+        existing = client.find_by_id("travelExpense", int(expense_id)) or {}
+        merged_payload = dict(existing)
+        merged_payload.update(_compact_payload(payload))
+        response = client.update_resource("travelExpense", int(expense_id), _compact_payload(merged_payload))
+        operations.append(
+            OperationResult(name="update-travel-expense", resource_id=int(expense_id), payload=response)
         )
 
     elif task_type == TaskType.DELETE_TRAVEL_EXPENSE:

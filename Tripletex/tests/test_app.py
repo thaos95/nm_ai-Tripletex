@@ -108,6 +108,13 @@ def mock_transport() -> httpx.MockTransport:
             payload["id"] = 7001
             return httpx.Response(200, json={"value": payload})
 
+        if request.method == "GET" and request.url.path == "/v2/travelExpense/42":
+            return httpx.Response(200, json={"value": {"id": 42, "date": "2026-03-18", "amount": 450.0}})
+
+        if request.method == "PUT" and request.url.path == "/v2/travelExpense/42":
+            payload = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": payload})
+
         if request.method == "GET" and request.url.path == "/v2/ledger/account":
             return httpx.Response(200, json={"fullResultSize": 1, "values": [{"id": 1, "number": 1000, "name": "Kasse"}]})
 
@@ -178,6 +185,72 @@ def test_solve_create_employee() -> None:
     assert response.json()["status"] == "completed"
     assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
+
+
+def test_inspect_returns_parsed_task_plan_and_warnings() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/inspect",
+        json={
+            "prompt": 'Erfassen Sie 32 Stunden für Hannah Richter (hannah.richter@example.org) auf der Aktivität "Design" im Projekt "E-Commerce-Entwicklung" für Bergwerk GmbH (Org.-Nr. 920065007). Stundensatz: 1550 NOK/h. Erstellen Sie eine Projektrechnung an den Kunden basierend auf den erfassten Stunden.',
+            "files": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parsed_task"]["task_type"] == "create_project_billing"
+    assert body["parsed_task"]["fields"]["name"] == "E-Commerce-Entwicklung"
+    assert body["parsed_task"]["related_entities"]["order"]["description"] == "Design"
+    assert body["plan"][-1] == {
+        "name": "create-billing-invoice",
+        "resource": "invoice",
+        "action": "create",
+    }
+    assert body["warnings"] == ["Dropped unsupported field 'email' for task create_project_billing"]
+    assert body["blocking_error"] is None
+
+
+def test_inspect_invoice_prompt_omits_send_flag_and_product_resolution_when_description_is_enough() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/inspect",
+        json={
+            "prompt": "Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) på 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.",
+            "files": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parsed_task"]["task_type"] == "create_invoice"
+    assert "sendByEmail" not in body["parsed_task"]["fields"]
+    assert [step["name"] for step in body["plan"]] == [
+        "resolve-invoice-customer",
+        "create-order",
+        "create-invoice",
+    ]
+
+
+def test_inspect_update_travel_expense_prompt() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/inspect",
+        json={
+            "prompt": "Oppdater reiseregning 42 med beløp 950 og dato 2026-03-19",
+            "files": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parsed_task"]["task_type"] == "update_travel_expense"
+    assert body["parsed_task"]["fields"]["travel_expense_id"] == 42
+    assert body["parsed_task"]["fields"]["amount"] == 950.0
+    assert [step["name"] for step in body["plan"]] == [
+        "find-travel-expense",
+        "update-travel-expense",
+    ]
 
 
 def test_solve_update_customer() -> None:
@@ -313,6 +386,26 @@ def test_solve_create_travel_expense() -> None:
         "/solve",
         json={
             "prompt": "Opprett reiseregning 2026-03-19 med belop 450",
+            "files": [],
+            "tripletex_credentials": {
+                "base_url": "https://tx-proxy.ainm.no/v2",
+                "session_token": "token",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
+    app.dependency_overrides.clear()
+
+
+def test_solve_update_travel_expense() -> None:
+    app.dependency_overrides[get_client_transport] = mock_transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Oppdater reiseregning 42 med beløp 950 og dato 2026-03-19",
             "files": [],
             "tripletex_credentials": {
                 "base_url": "https://tx-proxy.ainm.no/v2",

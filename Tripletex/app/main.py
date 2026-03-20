@@ -9,7 +9,7 @@ from app.config import settings
 from app.logging_utils import get_logger
 from app.parser import parse_prompt
 from app.planner import build_plan
-from app.schemas import SolveRequest, SolveResponse, TaskType
+from app.schemas import InspectRequest, InspectResponse, SolveRequest, SolveResponse, TaskType
 from app.validator import validate_and_normalize_task
 from app.workflows.executor import execute_plan
 
@@ -41,9 +41,40 @@ def get_client_transport() -> Optional[httpx.BaseTransport]:
     return None
 
 
+def build_parsing_input(prompt: str, files) -> str:
+    decoded_files = decode_files(files)
+    attachment_text = extract_attachment_text(decoded_files)
+    attachment_hints = summarize_attachment_hints(attachment_text)
+    attachment_description = describe_attachments(decoded_files)
+    parsing_input = prompt
+    if attachment_description:
+        parsing_input = "{0}\n\nAttachment metadata:\n{1}".format(parsing_input, attachment_description)
+    if attachment_hints:
+        parsing_input = "{0}\n\nAttachment hints:\n{1}".format(parsing_input, attachment_hints)
+    if attachment_text:
+        parsing_input = "{0}\n\nAttachment text:\n{1}".format(parsing_input, attachment_text)
+    return parsing_input
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/inspect", response_model=InspectResponse, dependencies=[Depends(require_api_key)])
+def inspect_prompt(request: InspectRequest) -> InspectResponse:
+    parsing_input = build_parsing_input(request.prompt, request.files)
+    parsed_task = parse_prompt(parsing_input)
+    validation = validate_and_normalize_task(parsed_task)
+    plan = build_plan(validation.parsed_task)
+    return InspectResponse(
+        parsing_input=parsing_input,
+        parsed_task=validation.parsed_task,
+        plan=[{"name": step.name, "resource": step.resource, "action": step.action} for step in plan.steps],
+        warnings=validation.warnings,
+        safety=validation.safety,
+        blocking_error=validation.blocking_error,
+    )
 
 
 @app.post("/solve", response_model=SolveResponse, dependencies=[Depends(require_api_key)])
@@ -52,16 +83,7 @@ def solve(
     transport: Optional[httpx.BaseTransport] = Depends(get_client_transport),
 ) -> SolveResponse:
     decoded_files = decode_files(request.files)
-    attachment_text = extract_attachment_text(decoded_files)
-    attachment_hints = summarize_attachment_hints(attachment_text)
-    attachment_description = describe_attachments(decoded_files)
-    parsing_input = request.prompt
-    if attachment_description:
-        parsing_input = "{0}\n\nAttachment metadata:\n{1}".format(parsing_input, attachment_description)
-    if attachment_hints:
-        parsing_input = "{0}\n\nAttachment hints:\n{1}".format(parsing_input, attachment_hints)
-    if attachment_text:
-        parsing_input = "{0}\n\nAttachment text:\n{1}".format(parsing_input, attachment_text)
+    parsing_input = build_parsing_input(request.prompt, request.files)
 
     parsed_task = parse_prompt(parsing_input)
     validation = validate_and_normalize_task(parsed_task)

@@ -62,13 +62,13 @@ TODAY_ISO = date.today().isoformat()
             {"organizationNumber": "864083323", "isCustomer": True},
             {},
         ),
-        (
-            "nb-invoice",
-            "Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.",
-            TaskType.CREATE_INVOICE,
-            {"invoiceDate": TODAY_ISO, "sendByEmail": True},
-            {"customer.organizationNumber": "845762686", "invoice.description": "Skylagring"},
-        ),
+            (
+                "nb-invoice",
+                "Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.",
+                TaskType.CREATE_INVOICE,
+                {"invoiceDate": TODAY_ISO},
+                {"customer.organizationNumber": "845762686", "invoice.description": "Skylagring"},
+            ),
         (
             "en-payment",
             'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.',
@@ -83,13 +83,13 @@ TODAY_ISO = date.today().isoformat()
             {"markAsPaid": True},
             {"customer.organizationNumber": "916058896", "invoice.description": "Desenvolvimento de sistemas"},
         ),
-        (
-            "fr-invoice",
-            "Créez et envoyez une facture au client Etoile SARL (nº org. 995085488) de 7250 NOK hors TVA. La facture concerne Rapport d'analyse.",
-            TaskType.CREATE_INVOICE,
-            {"sendByEmail": True, "orderDate": TODAY_ISO},
-            {"customer.organizationNumber": "995085488", "invoice.description": "Rapport d'analyse"},
-        ),
+            (
+                "fr-invoice",
+                "Créez et envoyez une facture au client Etoile SARL (nº org. 995085488) de 7250 NOK hors TVA. La facture concerne Rapport d'analyse.",
+                TaskType.CREATE_INVOICE,
+                {"orderDate": TODAY_ISO},
+                {"customer.organizationNumber": "995085488", "invoice.description": "Rapport d'analyse"},
+            ),
         (
             "de-department",
             'Erstellen Sie drei Abteilungen in Tripletex: "Logistikk", "Salg" und "Drift".',

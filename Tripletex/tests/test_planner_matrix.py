@@ -35,6 +35,7 @@ from app.schemas import ParsedTask, TaskType
         ),
         (TaskType.CREATE_PAYROLL_VOUCHER, ["create-payroll-voucher"]),
         (TaskType.CREATE_TRAVEL_EXPENSE, ["create-travel-expense"]),
+        (TaskType.UPDATE_TRAVEL_EXPENSE, ["find-travel-expense", "update-travel-expense"]),
         (TaskType.DELETE_TRAVEL_EXPENSE, ["lookup-travel-expense", "delete-travel-expense"]),
         (TaskType.DELETE_VOUCHER, ["delete-voucher"]),
         (TaskType.LIST_LEDGER_ACCOUNTS, ["list-ledger-accounts"]),
@@ -48,3 +49,23 @@ def test_build_plan_matrix(task_type: TaskType, expected_steps: list) -> None:
     plan = build_plan(parsed_task)
 
     assert [step.name for step in plan.steps] == expected_steps
+
+
+def test_build_plan_skips_invoice_product_resolution_when_description_is_present() -> None:
+    parsed_task = ParsedTask(
+        task_type=TaskType.CREATE_INVOICE,
+        confidence=1.0,
+        related_entities={
+            "customer": {"name": "Brattli AS", "organizationNumber": "845762686"},
+            "invoice": {"description": "Skylagring"},
+            "order": {"description": "Skylagring"},
+        },
+    )
+
+    plan = build_plan(parsed_task)
+
+    assert [step.name for step in plan.steps] == [
+        "resolve-invoice-customer",
+        "create-order",
+        "create-invoice",
+    ]

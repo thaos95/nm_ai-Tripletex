@@ -26,6 +26,7 @@ class TaskType(str, Enum):
     CREATE_DIMENSION_VOUCHER = "create_dimension_voucher"
     CREATE_PAYROLL_VOUCHER = "create_payroll_voucher"
     CREATE_TRAVEL_EXPENSE = "create_travel_expense"
+    UPDATE_TRAVEL_EXPENSE = "update_travel_expense"
     DELETE_TRAVEL_EXPENSE = "delete_travel_expense"
     DELETE_VOUCHER = "delete_voucher"
     LIST_LEDGER_ACCOUNTS = "list_ledger_accounts"
@@ -88,6 +89,27 @@ class SolveRequest(BaseModel):
 
 class SolveResponse(BaseModel):
     status: str = "completed"
+
+
+class InspectRequest(BaseModel):
+    prompt: str
+    files: List[FilePayload] = Field(default_factory=list)
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("prompt must not be empty")
+        return value
+
+
+class InspectResponse(BaseModel):
+    parsing_input: str
+    parsed_task: "ParsedTask"
+    plan: List[Dict[str, str]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    safety: str
+    blocking_error: Optional[str] = None
 
 
 class ParsedTask(BaseModel):

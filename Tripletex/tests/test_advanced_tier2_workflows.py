@@ -107,6 +107,42 @@ def test_project_billing_workflow_creates_project_then_invoice() -> None:
         "POST /v2/invoice",
     ]
     assert recorded["project_payloads"][0]["projectManager"]["id"] == 1001
+    assert recorded["invoice_payloads"][0] == {
+        "invoiceDate": recorded["invoice_payloads"][0]["invoiceDate"],
+        "customer": {"id": 2001},
+        "orders": [{"id": 5001}],
+    }
+    app.dependency_overrides.clear()
+
+
+def test_german_project_billing_prompt_uses_minimal_invoice_payload() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: advanced_transport(recorded)
+    client = TestClient(app)
+
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Erfassen Sie 32 Stunden für Hannah Richter (hannah.richter@example.org) auf der Aktivität "Design" im Projekt "E-Commerce-Entwicklung" für Bergwerk GmbH (Org.-Nr. 920065007). Stundensatz: 1550 NOK/h. Erstellen Sie eine Projektrechnung an den Kunden basierend auf den erfassten Stunden.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert recorded["calls"][0] == "GET /v2/customer"
+    assert recorded["calls"][-3:] == [
+        "POST /v2/project",
+        "POST /v2/order",
+        "POST /v2/invoice",
+    ]
+    assert recorded["project_payloads"][0]["name"] == "E-Commerce-Entwicklung"
+    assert recorded["order_payloads"][0]["orderLines"][0]["description"] == "Design"
+    assert recorded["invoice_payloads"][0] == {
+        "invoiceDate": recorded["invoice_payloads"][0]["invoiceDate"],
+        "customer": {"id": 2001},
+        "orders": [{"id": 5001}],
+    }
     app.dependency_overrides.clear()
 
 

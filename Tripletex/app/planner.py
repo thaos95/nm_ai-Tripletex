@@ -1,6 +1,21 @@
 from app.schemas import ExecutionPlan, ParsedTask, PlannedStep, TaskType
 
 
+def _invoice_requires_product_resolution(parsed_task: ParsedTask) -> bool:
+    product_spec = parsed_task.related_entities.get("product", {})
+    if product_spec.get("description"):
+        return False
+    invoice_spec = parsed_task.related_entities.get("invoice", {})
+    if invoice_spec.get("description"):
+        return False
+    order_spec = parsed_task.related_entities.get("order", {})
+    if order_spec.get("description"):
+        return False
+    if product_spec.get("name"):
+        return False
+    return True
+
+
 def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
     task_type = parsed_task.task_type
     steps = []
@@ -39,18 +54,16 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
     elif task_type == TaskType.CREATE_DEPARTMENT:
         steps.append(PlannedStep(name="create-department", resource="department", action="create"))
     elif task_type == TaskType.CREATE_ORDER:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-order-customer", resource="customer", action="resolve"),
-                PlannedStep(name="resolve-order-product", resource="product", action="resolve"),
-                PlannedStep(name="create-order", resource="order", action="create"),
-            ]
-        )
+        steps.append(PlannedStep(name="resolve-order-customer", resource="customer", action="resolve"))
+        if _invoice_requires_product_resolution(parsed_task):
+            steps.append(PlannedStep(name="resolve-order-product", resource="product", action="resolve"))
+        steps.append(PlannedStep(name="create-order", resource="order", action="create"))
     elif task_type == TaskType.CREATE_INVOICE:
+        steps.append(PlannedStep(name="resolve-invoice-customer", resource="customer", action="resolve"))
+        if _invoice_requires_product_resolution(parsed_task):
+            steps.append(PlannedStep(name="resolve-invoice-product", resource="product", action="resolve"))
         steps.extend(
             [
-                PlannedStep(name="resolve-invoice-customer", resource="customer", action="resolve"),
-                PlannedStep(name="resolve-invoice-product", resource="product", action="resolve"),
                 PlannedStep(name="create-order", resource="order", action="create"),
                 PlannedStep(name="create-invoice", resource="invoice", action="create"),
             ]
@@ -85,6 +98,13 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
         steps.append(PlannedStep(name="create-payroll-voucher", resource="ledger/voucher", action="create"))
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         steps.append(PlannedStep(name="create-travel-expense", resource="travelExpense", action="create"))
+    elif task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
+        steps.extend(
+            [
+                PlannedStep(name="find-travel-expense", resource="travelExpense", action="find"),
+                PlannedStep(name="update-travel-expense", resource="travelExpense", action="update"),
+            ]
+        )
     elif task_type == TaskType.DELETE_TRAVEL_EXPENSE:
         steps.extend(
             [

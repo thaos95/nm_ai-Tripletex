@@ -22,5 +22,5 @@ def test_parse_german_send_invoice_sets_send_intent() -> None:
     validated = validate_and_normalize_task(parsed)
 
     assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
-    assert validated.parsed_task.fields["sendByEmail"] is True
+    assert "sendByEmail" not in validated.parsed_task.fields
     assert validated.parsed_task.related_entities["invoice"]["description"] == "Lizenz"
