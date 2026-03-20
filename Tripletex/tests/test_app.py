@@ -394,8 +394,8 @@ def test_solve_create_travel_expense() -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "completed"}
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Unsupported task"
     app.dependency_overrides.clear()
 
 
@@ -797,6 +797,32 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert recorded["invoice_payload"]["markAsPaid"] is True
     assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
     assert recorded["invoice_payload"]["amountPaidCurrency"] == 30450.0
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_travel_expense_is_rejected_as_unsupported() -> None:
+    recorded = {}
+
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Register a travel expense for William Wilson (william.wilson@example.org) for "Client visit Trondheim". The trip lasted 2 days with per diem (daily rate 800 NOK). Expenses: flight ticket 7600 NOK and taxi 700 NOK.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Unsupported task"
+    assert recorded.get("calls") is None
     app.dependency_overrides.clear()
 
 

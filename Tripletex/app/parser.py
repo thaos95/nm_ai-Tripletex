@@ -1388,15 +1388,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 amount += sum(remaining_expenses)
         if amount is not None:
             fields["amount"] = amount
-        if "date" in fields:
-            fields["expenseDate"] = fields.pop("date")
-        if "kilometer" in lowered or "km" in lowered:
-            fields["distance"] = int(amount) if amount is not None else 0
         return ParsedTask(
-            task_type=TaskType.CREATE_TRAVEL_EXPENSE,
-            confidence=0.72,
+            task_type=TaskType.UNSUPPORTED,
+            confidence=0.96,
             language_hint=_language_hint(prompt),
             fields=fields,
+            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: travel expense creation is not available in the competition-safe workflow"],
         )
 
     if entity == "voucher" and action == "delete":
