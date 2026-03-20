@@ -1,6 +1,7 @@
-def main() -> None:
-    print("Hello from nm-ai2!")
-
+from Tripletex.app.main import app
 
 if __name__ == "__main__":
-    main()
+    import os
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))

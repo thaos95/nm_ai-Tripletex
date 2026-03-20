@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
@@ -534,11 +534,27 @@ def _register_invoice_payment(
     fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
     if fields.get("amountPaidCurrency") is None and fields.get("amount") is not None:
         fields["amountPaidCurrency"] = fields.get("amount")
-    response = client._request(
-        "PUT",
-        "/invoice/{0}/:payment".format(int(invoice_id)),
-        params=_build_invoice_payment_payload(fields),
-    )
+    try:
+        response = client._request(
+            "PUT",
+            "/invoice/{0}/:payment".format(int(invoice_id)),
+            params=_build_invoice_payment_payload(fields),
+        )
+    except TripletexClientError as exc:
+        classified = classify_tripletex_error(str(exc))
+        if exc.status_code == 404 and classified.category in {
+            TripletexErrorCategory.NOT_FOUND,
+            TripletexErrorCategory.WRONG_ENDPOINT,
+        }:
+            operations.append(
+                OperationResult(
+                    name="register-invoice-payment",
+                    resource_id=int(invoice_id),
+                    payload={"skipped": True, "reason": "invoice not available for payment"},
+                )
+            )
+            return
+        raise
     operations.append(
         OperationResult(name="register-invoice-payment", resource_id=int(invoice_id), payload=response)
     )
@@ -633,7 +649,11 @@ def _create_credit_note(
     invoice_id: int,
     operations: list,
 ) -> Dict[str, Any]:
-    response = client._request("PUT", "/invoice/{0}/:createCreditNote".format(invoice_id))
+    response = client._request(
+        "PUT",
+        "/invoice/{0}/:createCreditNote".format(invoice_id),
+        params={"date": datetime.fromisoformat(operations[0].payload.get("invoice", {}).get("invoiceDate", _today_iso())).date().isoformat()},
+    )
     operations.append(OperationResult(name="create-credit-note", resource_id=invoice_id, payload=response))
     return response
 
