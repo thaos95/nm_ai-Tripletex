@@ -198,6 +198,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "deliveryDate",
             "fixedPriceAmountCurrency",
             "billingPercentage",
+            "hourlyRateCurrency",
             "amount",
         },
         TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber", "departmentNames"},
@@ -284,6 +285,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             warnings.append("Project creation has no linked customer; this is risky")
 
     if normalized.task_type == TaskType.CREATE_PROJECT_BILLING:
+        if not normalized.fields.get("name") and normalized.related_entities.get("project", {}).get("name"):
+            normalized.fields["name"] = normalized.related_entities["project"]["name"]
         if not normalized.fields.get("name"):
             return ValidationResult(normalized, blocking_error="Project billing requires project name")
         if "customer" not in normalized.related_entities:

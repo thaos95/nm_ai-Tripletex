@@ -48,7 +48,7 @@ ENTITY_KEYWORDS = {
     "department": ["avdeling", "department", "departamento", "abteilung", "departement"],
     "invoice": ["faktura", "invoice", "factura", "fatura", "rechnung", "facture"],
     "order": ["ordre", "order", "pedido", "bestellung", "commande"],
-    "travel_expense": ["reiseregning", "travel expense", "expense report", "viagem", "spesen"],
+    "travel_expense": ["reiseregning", "reiserekning", "travel expense", "expense report", "viagem", "spesen"],
     "voucher": ["bilag", "voucher", "comprobante", "buchung"],
     "ledger_account": ["kontoplan", "ledger account", "chart of accounts", "konti"],
     "ledger_posting": ["hovedboksposteringer", "ledger posting", "postering", "postings", "hovedbok"],
@@ -120,7 +120,7 @@ def _today_iso() -> str:
 
 def _language_hint(prompt: str) -> str:
     lowered = _normalized_text(prompt)
-    if any(word in lowered for word in ["opprett", "ansatt", "kunde", "reiseregning", "avdeling"]):
+    if any(word in lowered for word in ["opprett", "ansatt", "kunde", "reiseregning", "reiserekning", "avdeling"]):
         return "nb"
     if any(word in lowered for word in ["create", "employee", "customer", "travel expense"]):
         return "en"
@@ -461,6 +461,31 @@ def _extract_percentage(prompt: str) -> Optional[float]:
     return float(match.group(1).replace(",", "."))
 
 
+def _extract_hours(prompt: str) -> Optional[float]:
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:timar|timer|hours|hrs|h)\b", prompt, re.IGNORECASE)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def _extract_daily_rate(prompt: str) -> Optional[float]:
+    match = re.search(r"(?:dagssats|daily rate)\s*(?:pa|på|of|:)?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def _extract_day_count(prompt: str) -> Optional[int]:
+    match = re.search(r"(\d+)\s*(?:dagar|dager|days)\b", prompt, re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _extract_currency_amounts(prompt: str) -> List[float]:
+    return [float(value.replace(",", ".")) for value in re.findall(r"(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)]
+
+
 def _extract_dimension_name(prompt: str) -> Optional[str]:
     quoted_values = [value.strip() for value in QUOTED_RE.findall(prompt) if value.strip()]
     if quoted_values:
@@ -573,6 +598,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         action = "create"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
+    if "reiseregning" in lowered or "reiserekning" in lowered or "travel expense" in lowered or "expense report" in lowered:
+        entity = "travel_expense"
     if not supplier_detected and payment_detected and invoice_context_detected:
         entity = "invoice"
         action = "create"
@@ -592,7 +619,28 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     )
     project_billing_detected = (
         entity == "project"
-        and any(token in lowered for token in ["fastpris", "fixed price", "partial payment", "delbetaling", "fakturer kunden", "bill the customer", "fatur", "invoice customer"])
+        and any(
+            token in lowered
+            for token in [
+                "fastpris",
+                "fixed price",
+                "partial payment",
+                "delbetaling",
+                "fakturer kunden",
+                "bill the customer",
+                "fatur",
+                "invoice customer",
+                "prosjektfaktura",
+                "project invoice",
+                "timesats",
+                "hourly rate",
+                "timar",
+                "timer",
+                "based on the registered hours",
+                "basert pa dei registrerte timane",
+                "basert på dei registrerte timane",
+            ]
+        )
     )
     dimension_voucher_detected = (
         any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimensjon", "dimensao contabilistica", "dimensao contabilistica", "dimensao contabilistica"])
@@ -745,6 +793,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         fields["deliveryDate"] = fields["invoiceDate"]
         fixed_price_amount = _extract_amount(prompt)
         billing_percentage = _extract_percentage(prompt)
+        hours = _extract_hours(prompt)
+        currency_amounts = _extract_currency_amounts(prompt)
         if fixed_price_amount is not None:
             fields["fixedPriceAmountCurrency"] = fixed_price_amount
         if billing_percentage is not None:
@@ -758,6 +808,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             if org_number:
                 related_entities["customer"]["organizationNumber"] = org_number
                 match_fields["customerOrganizationNumber"] = org_number
+        if project_name:
+            related_entities["project"] = {"name": project_name}
         manager_name = _extract_project_manager_name_safe(prompt)
         if manager_name:
             manager_first_name, manager_last_name = _split_person_name(manager_name)
@@ -768,9 +820,18 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 related_entities["project_manager"]["last_name"] = manager_last_name
             if "email" in fields:
                 related_entities["project_manager"]["email"] = fields["email"]
+        activity_name = _extract_named_entity(prompt, ["aktivitet", "activity"])
+        if activity_name:
+            related_entities["activity"] = {"name": activity_name}
+        if hours is not None:
+            related_entities["time_entries"] = {"hours": hours}
+        if fields.get("amount") is None and hours is not None and len(currency_amounts) >= 1:
+            rate_amount = currency_amounts[-1]
+            fields["hourlyRateCurrency"] = rate_amount
+            fields["amount"] = round(hours * rate_amount, 2)
         if fields.get("amount") is not None:
             related_entities["invoice"] = {
-                "description": "Partial billing {0}% of fixed price".format(int(billing_percentage or 100)),
+                "description": activity_name or "Project billing",
                 "amountExcludingVatCurrency": fields["amount"],
             }
             related_entities["order"] = {"description": related_entities["invoice"]["description"]}
@@ -839,6 +900,21 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
     if entity == "travel_expense" and action == "create":
         amount = _extract_amount(prompt)
+        day_count = _extract_day_count(prompt)
+        daily_rate = _extract_daily_rate(prompt)
+        expense_amounts = _extract_currency_amounts(prompt)
+        if day_count is not None and daily_rate is not None:
+            amount = float(day_count * daily_rate)
+            if expense_amounts:
+                # Drop the daily rate if it appears in the generic amount list before summing expenses.
+                remaining_expenses = []
+                dropped_rate = False
+                for expense in expense_amounts:
+                    if not dropped_rate and abs(expense - daily_rate) < 0.001:
+                        dropped_rate = True
+                        continue
+                    remaining_expenses.append(expense)
+                amount += sum(remaining_expenses)
         if amount is not None:
             fields["amount"] = amount
         if "date" in fields:
@@ -1015,7 +1091,20 @@ def parse_prompt(prompt: str) -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     llm_parsed = parse_prompt_with_llm(prompt)
     rule_based = parse_prompt_rule_based(prompt)
+    specialized_rule_tasks = {
+        TaskType.CREATE_TRAVEL_EXPENSE,
+        TaskType.CREATE_CREDIT_NOTE,
+        TaskType.CREATE_PROJECT_BILLING,
+        TaskType.CREATE_DIMENSION_VOUCHER,
+        TaskType.CREATE_PAYROLL_VOUCHER,
+    }
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
+        if (
+            rule_based.task_type in specialized_rule_tasks
+            and llm_parsed.task_type != rule_based.task_type
+            and rule_based.confidence >= 0.7
+        ):
+            return rule_based
         if llm_parsed.task_type == rule_based.task_type:
             for key, value in rule_based.fields.items():
                 if key not in llm_parsed.fields:
