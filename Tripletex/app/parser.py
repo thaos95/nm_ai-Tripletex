@@ -389,6 +389,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             "register full payment",
             "full payment",
             "registe",
+            "registe o pagamento",
+            "registre el pago",
             "registrer full betaling",
             "betaling",
             "pago completo",
@@ -402,12 +404,16 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             "payment on this invoice",
         ]
     )
+    invoice_context_detected = any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"])
     if supplier_detected:
         entity = "customer"
         action = "create"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
-    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"]) and (
+    if not supplier_detected and payment_detected and invoice_context_detected:
+        entity = "invoice"
+        action = "create"
+    if not supplier_detected and invoice_context_detected and (
         any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"])
         or payment_detected
     ):
