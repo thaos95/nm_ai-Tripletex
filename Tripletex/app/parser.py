@@ -32,6 +32,7 @@ CREATE_WORDS = [
     "envia",
     "envía",
     "registre",
+    "registe",
     "registrieren",
     "anlegen",
     "legen sie",
@@ -43,7 +44,7 @@ READ_WORDS = ["hent", "list", "liste", "finn", "find", "show", "vis", "search", 
 ENTITY_KEYWORDS = {
     "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe", "tilsett", "tilsatt"],
     "customer": ["kunde", "customer", "cliente", "kund", "client"],
-    "product": ["produkt", "product", "producto", "produto"],
+    "product": ["produkt", "product", "producto", "produto", "produit"],
     "project": ["prosjekt", "project", "proyecto", "projeto", "projekt", "projet"],
     "department": ["avdeling", "department", "departamento", "abteilung", "departement"],
     "invoice": ["faktura", "invoice", "factura", "fatura", "rechnung", "facture"],
@@ -114,6 +115,16 @@ PAYMENT_TOKENS = [
 ]
 
 
+INTENT_THRESHOLDS = {
+    "supplier_customer": 6,
+    "travel_expense": 8,
+    "credit_note": 8,
+    "project_billing": 8,
+    "dimension_voucher": 8,
+    "payroll_voucher": 8,
+}
+
+
 def _today_iso() -> str:
     return date.today().isoformat()
 
@@ -137,6 +148,12 @@ def _language_hint(prompt: str) -> str:
 
 def _contains_any(text: str, options: List[str]) -> bool:
     return any(option in text for option in options)
+
+
+def _contains_action_keyword(text: str, keyword: str) -> bool:
+    if " " in keyword:
+        return keyword in text
+    return re.search(r"\b{0}\b".format(re.escape(keyword)), text) is not None
 
 
 def _contains_send_invoice_intent(text: str) -> bool:
@@ -169,13 +186,13 @@ def _repair_mojibake(text: str) -> str:
 
 
 def _detect_action(lowered: str) -> Optional[str]:
-    if _contains_any(lowered, CREATE_WORDS):
+    if any(_contains_action_keyword(lowered, word) for word in CREATE_WORDS):
         return "create"
-    if _contains_any(lowered, UPDATE_WORDS):
+    if any(_contains_action_keyword(lowered, word) for word in UPDATE_WORDS):
         return "update"
-    if _contains_any(lowered, DELETE_WORDS):
+    if any(_contains_action_keyword(lowered, word) for word in DELETE_WORDS):
         return "delete"
-    if _contains_any(lowered, READ_WORDS):
+    if any(_contains_action_keyword(lowered, word) for word in READ_WORDS):
         return "read"
     return None
 
@@ -291,6 +308,9 @@ def _extract_project_customer_name(prompt: str) -> Optional[str]:
     alt_match = re.search(r"(?:vinculado al cliente|vinculado ao cliente)\s+([A-Z][^,(.\n]+)", prompt, re.IGNORECASE)
     if alt_match:
         return _clean_name(alt_match.group(1))
+    german_match = re.search(r"(?:f[uü]r)\s+([A-ZÃ†Ã˜Ã…Ã‰ÃœÃ–Ã„][^,(.\n]+)\s+\((?:Org|org)", prompt, re.IGNORECASE)
+    if german_match:
+        return _clean_name(german_match.group(1))
     french_match = re.search(r"(?:au client)\s+([^,(.\n][^,(.\n]+)", prompt, re.IGNORECASE)
     if french_match:
         return _clean_name(french_match.group(1))
@@ -462,7 +482,7 @@ def _extract_percentage(prompt: str) -> Optional[float]:
 
 
 def _extract_hours(prompt: str) -> Optional[float]:
-    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:timar|timer|hours|hrs|h)\b", prompt, re.IGNORECASE)
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:timar|timer|stunden|hours|hrs|h)\b", prompt, re.IGNORECASE)
     if not match:
         return None
     return float(match.group(1).replace(",", "."))
@@ -558,17 +578,127 @@ def _extract_invoice_description_fallback(prompt: str) -> Optional[str]:
     return None
 
 
+def _score_intents(lowered: str) -> Dict[str, int]:
+    scores: Dict[str, int] = {}
+
+    def add(intent: str, value: int) -> None:
+        scores[intent] = scores.get(intent, 0) + value
+
+    if any(token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant", "proveedor"]):
+        add("supplier_customer", 6)
+    if "tilsett" in lowered or "tilsatt" in lowered:
+        add("employee", 3)
+    if any(
+        token in lowered
+        for token in [
+            "reiseregning",
+            "reiserekning",
+            "travel expense",
+            "expense report",
+            "despesa de viagem",
+            "relatorio de despesas",
+            "relatório de despesas",
+        ]
+    ):
+        add("travel_expense", 8)
+    if any(token in lowered for token in ["kreditnota", "credit note", "credit memo", "nota de credito", "avoir", "gutschrift"]):
+        add("credit_note", 9)
+    if any(token in lowered for token in ["payroll", "salary api", "payroll expense"]) and any(
+        token in lowered for token in ["salary", "bonus", "lonn", "lønn"]
+    ):
+        add("payroll_voucher", 9)
+    if any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimensjon", "dimensao contabilistica", "dimensão contabilística"]) and any(
+        token in lowered for token in ["voucher", "bilag", "document", "dokument", "lance um documento", "post a document", "bokfor"]
+    ):
+        add("dimension_voucher", 9)
+    if any(token in lowered for token in ["project", "prosjekt", "projeto", "proyecto", "projekt"]):
+        add("project", 3)
+    if any(
+        token in lowered
+        for token in [
+            "fastpris",
+            "fixed price",
+            "delbetaling",
+            "fakturer kunden",
+            "bill the customer",
+            "timesats",
+            "hourly rate",
+            "timar",
+            "timer",
+            "stunden",
+            "stundensatz",
+            "based on the registered hours",
+            "basert pa dei registrerte timane",
+            "basert på dei registrerte timane",
+            "basierend auf den erfassten stunden",
+            "fature o cliente",
+        ]
+    ):
+        add("project_billing", 8)
+    if _contains_payment_intent(lowered):
+        add("payment_invoice", 7)
+    if any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"]):
+        add("invoice", 4)
+    if any(token in lowered for token in ["customer", "kunde", "cliente", "client"]):
+        add("customer", 2)
+    project_context = any(
+        token in lowered for token in ["project", "prosjekt", "projeto", "proyecto", "projekt", "projet"]
+    )
+    strict_project_billing_trigger = any(
+        token in lowered
+        for token in [
+            "fastpris",
+            "fixed price",
+            "delbetaling",
+            "fakturer kunden",
+            "bill the customer",
+            "based on the registered hours",
+            "basert pa dei registrerte timane",
+            "basert pÃ¥ dei registrerte timane",
+            "basierend auf den erfassten stunden",
+            "fature o cliente",
+        ]
+    )
+    strict_project_billing_rate_signal = any(token in lowered for token in ["timesats", "hourly rate", "stundensatz"])
+    strict_project_billing_hours_signal = any(
+        re.search(pattern, lowered)
+        for pattern in [r"\b\d+(?:[.,]\d+)?\s*timar\b", r"\b\d+(?:[.,]\d+)?\s*timer\b", r"\b\d+(?:[.,]\d+)?\s*stunden\b"]
+    )
+    if scores.get("project_billing") and not (
+        (project_context and strict_project_billing_trigger)
+        or (strict_project_billing_rate_signal and strict_project_billing_hours_signal)
+    ):
+        scores.pop("project_billing", None)
+    return scores
+
+
+def _classify_intent(lowered: str) -> Optional[str]:
+    scores = _score_intents(lowered)
+    for intent in [
+        "supplier_customer",
+        "travel_expense",
+        "credit_note",
+        "project_billing",
+        "dimension_voucher",
+        "payroll_voucher",
+    ]:
+        if scores.get(intent, 0) >= INTENT_THRESHOLDS[intent]:
+            return intent
+    return None
+
+
 def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     lowered = _normalized_text(prompt)
     action = _detect_action(lowered)
     entity = _detect_entity(lowered)
+    classified_intent = _classify_intent(lowered)
     fields = _extract_common_fields(prompt)
     related_entities = {}
     match_fields = {}
     notes = []
 
     supplier_detected = any(
-        token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant"]
+        token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant", "proveedor"]
     )
     payment_detected = any(
         token in lowered
@@ -598,8 +728,20 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         action = "create"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
-    if "reiseregning" in lowered or "reiserekning" in lowered or "travel expense" in lowered or "expense report" in lowered:
+    if (
+        "reiseregning" in lowered
+        or "reiserekning" in lowered
+        or "travel expense" in lowered
+        or "expense report" in lowered
+        or "despesa de viagem" in lowered
+        or "relatorio de despesas" in lowered
+        or "relatório de despesas" in lowered
+    ):
         entity = "travel_expense"
+    if "hovedboksposteringer" in lowered or "ledger posting" in lowered or "postings" in lowered:
+        entity = "ledger_posting"
+    if "kontoplan" in lowered or "ledger account" in lowered or "chart of accounts" in lowered:
+        entity = "ledger_account"
     if not supplier_detected and payment_detected and invoice_context_detected:
         entity = "invoice"
         action = "create"
@@ -610,12 +752,21 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     ):
         entity = "invoice"
         action = "create"
-    if "project" in lowered or "prosjekt" in lowered or "projeto" in lowered or "proyecto" in lowered:
+    if (
+        "project" in lowered
+        or "prosjekt" in lowered
+        or "projeto" in lowered
+        or "proyecto" in lowered
+        or "projekt" in lowered
+        or "projet" in lowered
+    ):
         entity = "project"
+    if "despesa de viagem" in lowered or "relatorio de despesas" in lowered or "relatório de despesas" in lowered:
+        action = "create"
 
     credit_note_detected = any(
         token in lowered
-        for token in ["kreditnota", "credit note", "credit memo", "nota de credito", "nota de credito", "avoir"]
+        for token in ["kreditnota", "credit note", "credit memo", "nota de credito", "nota de credito", "avoir", "gutschrift"]
     )
     project_billing_detected = (
         entity == "project"
@@ -642,6 +793,43 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             ]
         )
     )
+    if entity == "project" and any(
+        token in lowered
+        for token in [
+            "projektfaktura",
+            "stunden",
+            "stundensatz",
+            "basierend auf den erfassten stunden",
+            "fature o cliente",
+        ]
+    ):
+        project_billing_detected = True
+    if project_billing_detected:
+        project_context = any(
+            token in lowered for token in ["project", "prosjekt", "projeto", "proyecto", "projekt", "projet"]
+        )
+        billing_phrase = any(
+            token in lowered
+            for token in [
+                "fastpris",
+                "fixed price",
+                "delbetaling",
+                "fakturer kunden",
+                "bill the customer",
+                "fature o cliente",
+                "based on the registered hours",
+                "basert pa dei registrerte timane",
+                "basert pÃ¥ dei registrerte timane",
+                "basierend auf den erfassten stunden",
+            ]
+        )
+        rate_signal = any(token in lowered for token in ["timesats", "hourly rate", "stundensatz"])
+        hours_signal = any(
+            re.search(pattern, lowered)
+            for pattern in [r"\b\d+(?:[.,]\d+)?\s*timar\b", r"\b\d+(?:[.,]\d+)?\s*timer\b", r"\b\d+(?:[.,]\d+)?\s*stunden\b"]
+        )
+        if not ((project_context and billing_phrase) or (rate_signal and hours_signal)):
+            project_billing_detected = False
     dimension_voucher_detected = (
         any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimensjon", "dimensao contabilistica", "dimensao contabilistica", "dimensao contabilistica"])
         and any(token in lowered for token in ["voucher", "bilag", "document", "dokument", "lance um documento", "post a document", "bokfor"])
@@ -650,6 +838,25 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         token in lowered
         for token in ["run payroll", "payroll", "lonn", "salary", "bonus", "payroll expense", "salary api"]
     )
+
+    if classified_intent == "supplier_customer":
+        entity = "customer"
+        action = "create"
+    if classified_intent == "travel_expense":
+        entity = "travel_expense"
+        action = "create" if action != "delete" else action
+    if classified_intent == "credit_note":
+        credit_note_detected = True
+        entity = "invoice"
+        action = "create"
+    if classified_intent == "project_billing":
+        project_billing_detected = True
+        entity = "project"
+        action = "create"
+    if classified_intent == "dimension_voucher":
+        dimension_voucher_detected = True
+    if classified_intent == "payroll_voucher":
+        payroll_detected = True
 
     if credit_note_detected:
         entity = "invoice"
@@ -820,7 +1027,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 related_entities["project_manager"]["last_name"] = manager_last_name
             if "email" in fields:
                 related_entities["project_manager"]["email"] = fields["email"]
-        activity_name = _extract_named_entity(prompt, ["aktivitet", "activity"])
+        activity_name = _extract_named_entity(prompt, ["aktivitet", "activity", "aktivitat", "aktivität"])
         if activity_name:
             related_entities["activity"] = {"name": activity_name}
         if hours is not None:
@@ -830,8 +1037,13 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             fields["hourlyRateCurrency"] = rate_amount
             fields["amount"] = round(hours * rate_amount, 2)
         if fields.get("amount") is not None:
+            billing_description = activity_name or (
+                "Partial billing {0}% of fixed price".format(int(billing_percentage or 100))
+                if billing_percentage is not None
+                else "Project billing"
+            )
             related_entities["invoice"] = {
-                "description": activity_name or "Project billing",
+                "description": billing_description,
                 "amountExcludingVatCurrency": fields["amount"],
             }
             related_entities["order"] = {"description": related_entities["invoice"]["description"]}
