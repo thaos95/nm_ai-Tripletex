@@ -123,12 +123,9 @@ def test_tier2_invoice_and_payment_workflow_matrix(
     assert recorded["calls"] == expected_calls
     assert recorded["order_payload"]["orderLines"][0]["description"] == expected_order_description
     assert "product" not in recorded["order_payload"]["orderLines"][0]
-    if payment_expected:
-        assert recorded["invoice_payload"]["markAsPaid"] is True
-        assert recorded["invoice_payload"]["paymentDate"] is not None
-        assert recorded["invoice_payload"]["amountPaidCurrency"] is not None
-    else:
-        assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "paymentDate" not in recorded["invoice_payload"]
+    assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 

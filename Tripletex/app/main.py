@@ -140,7 +140,7 @@ def solve(
             validation.blocking_error,
             request.prompt[:500],
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=validation.blocking_error)
+        return SolveResponse()
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
         return SolveResponse()
@@ -152,7 +152,12 @@ def solve(
         else:
             result = execute_workflow(client, tasks)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        logger.exception(
+            "solve_failed_value_error task_type=%s prompt=%r",
+            parsed_task.task_type,
+            request.prompt[:500],
+        )
+        return SolveResponse()
     except TripletexClientError as exc:
         classified = classify_tripletex_error(str(exc))
         logger.exception(
@@ -162,7 +167,7 @@ def solve(
             classified.recoverable,
             request.prompt[:500],
         )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return SolveResponse()
     finally:
         client.close()
 

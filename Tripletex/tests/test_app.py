@@ -773,9 +773,9 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "System Development"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "paymentDate" not in recorded["invoice_payload"]
+    assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 
@@ -794,9 +794,9 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Desenvolvimento de sistemas"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 30450.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "paymentDate" not in recorded["invoice_payload"]
+    assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 
@@ -867,6 +867,6 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert len(recorded["order_payload"]["orderLines"]) == 2
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 39550.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()

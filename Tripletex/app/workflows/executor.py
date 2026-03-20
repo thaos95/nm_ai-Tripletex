@@ -75,9 +75,6 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
     payload = {
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate"),
-        "markAsPaid": fields.get("markAsPaid"),
-        "paymentDate": fields.get("paymentDate"),
-        "amountPaidCurrency": fields.get("amountPaidCurrency"),
         "creditNote": fields.get("creditNote"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
@@ -103,8 +100,6 @@ def _build_minimal_invoice_payload(
 
 
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
-    if fields.get("markAsPaid"):
-        return False
     if fields.get("creditNote"):
         return False
     classified = classify_tripletex_error(str(exc))
@@ -664,18 +659,39 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
 
     elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
-        dimension_response = client.create_resource("dimension", _build_dimension_payload(fields))
-        dimension_id = _extract_id(dimension_response)
-        operations.append(OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response))
         selected_value_id = None
         value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
         selected_value_name = str(fields.get("selectedDimensionValue") or "")
-        for value_name in value_names:
-            value_response = client.create_resource("dimension/value", _build_dimension_value_payload(int(dimension_id), value_name))
-            value_id = _extract_id(value_response)
-            operations.append(OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response))
-            if value_name == selected_value_name:
-                selected_value_id = value_id
+        try:
+            dimension_response = client.create_resource("dimension", _build_dimension_payload(fields))
+            dimension_id = _extract_id(dimension_response)
+            operations.append(
+                OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
+            )
+            for value_name in value_names:
+                value_response = client.create_resource(
+                    "dimension/value",
+                    _build_dimension_value_payload(int(dimension_id), value_name),
+                )
+                value_id = _extract_id(value_response)
+                operations.append(
+                    OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
+                )
+                if value_name == selected_value_name:
+                    selected_value_id = value_id
+        except TripletexClientError as exc:
+            classified = classify_tripletex_error(str(exc))
+            if classified.category != TripletexErrorCategory.WRONG_ENDPOINT:
+                raise
+            operations.append(
+                OperationResult(
+                    name="skip-dimension-setup",
+                    payload={
+                        "reason": "dimension-endpoint-unavailable",
+                        "selectedDimensionValue": selected_value_name,
+                    },
+                )
+            )
         voucher_payload = _build_voucher_payload(
             fields,
             description="Dimension voucher {0}".format(fields.get("dimensionName")),

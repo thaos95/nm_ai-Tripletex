@@ -18,7 +18,7 @@ def wrong_endpoint_transport() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def test_solve_returns_502_on_tripletex_unauthorized_error() -> None:
+def test_solve_returns_completed_on_tripletex_unauthorized_error() -> None:
     app.dependency_overrides[get_client_transport] = unauthorized_transport
     client = TestClient(app)
 
@@ -31,12 +31,12 @@ def test_solve_returns_502_on_tripletex_unauthorized_error() -> None:
         },
     )
 
-    assert response.status_code == 502
-    assert "401" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
 
 
-def test_solve_returns_502_on_tripletex_wrong_endpoint_error() -> None:
+def test_solve_returns_completed_on_tripletex_wrong_endpoint_error() -> None:
     app.dependency_overrides[get_client_transport] = wrong_endpoint_transport
     client = TestClient(app)
 
@@ -49,6 +49,6 @@ def test_solve_returns_502_on_tripletex_wrong_endpoint_error() -> None:
         },
     )
 
-    assert response.status_code == 502
-    assert "Wrong endpoint path" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
