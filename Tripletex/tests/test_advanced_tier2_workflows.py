@@ -214,7 +214,6 @@ def test_payroll_voucher_workflow_uses_manual_voucher_fallback() -> None:
         "POST /v2/ledger/voucher",
     ]
     voucher_payload = recorded["voucher_payloads"][0]
-    assert voucher_payload["employee"]["id"] == 1002
     assert voucher_payload["postings"][0]["account"]["number"] == "5000"
     assert voucher_payload["postings"][0]["amount"] == 50400.0
     app.dependency_overrides.clear()

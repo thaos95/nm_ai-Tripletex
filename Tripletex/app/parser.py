@@ -959,6 +959,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         or ("invoice" in lowered and any(token in lowered for token in ["including vat", "input vat", "office services", "account "]))
         or ("faktura" in lowered and any(token in lowered for token in ["inkludert mva", "inngaende mva", "konto "]))
         or ("rechnung" in lowered and any(token in lowered for token in ["erhalten", "mwst", "vorsteuer", "konto "]))
+        or ("facture" in lowered and any(token in lowered for token in ["tva deductible", "tva déductible", "facture fournisseur", "compte "]))
     )
     payment_detected = any(
         token in lowered
@@ -1021,6 +1022,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         or "reiserekning" in lowered
         or "travel expense" in lowered
         or "expense report" in lowered
+        or "nota de gastos de viaje" in lowered
         or "despesa de viagem" in lowered
         or "relatorio de despesas" in lowered
         or "relatório de despesas" in lowered
@@ -1436,7 +1438,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 day_count = int(fallback_day_match.group(1))
         if daily_rate is None:
             fallback_rate_match = re.search(
-                r"(?:tagessatz|tarifa diaria|tasa diaria|taux journalier)[^\d\n]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b",
+                r"(?:dagsats|dagssats|tagessatz|tarifa diaria|tasa diaria|taux journalier)[^\d\n]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b",
                 prompt,
                 re.IGNORECASE,
             )

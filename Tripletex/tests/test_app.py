@@ -1005,6 +1005,7 @@ def test_solve_supplier_invoice_prompt_uses_supplier_endpoints() -> None:
     assert recorded["supplier_payload"]["organizationNumber"] == "967247049"
     assert recorded["supplier_invoice_payload"]["supplier"]["id"] == 7001
     assert recorded["supplier_invoice_payload"]["invoiceNumber"] == "INV-2026-9601"
+    assert "vatPercentage" not in recorded["supplier_invoice_payload"]
     app.dependency_overrides.clear()
 
 

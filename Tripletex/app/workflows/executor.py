@@ -129,7 +129,6 @@ def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) ->
         "invoiceNumber": fields.get("invoiceNumber"),
         "supplier": {"id": supplier_id},
         "amount": fields.get("amount"),
-        "vatPercentage": fields.get("vatPercentage"),
     }
     return _compact_payload(payload)
 
@@ -154,7 +153,9 @@ def _build_minimal_invoice_payload(
 def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     payload = {
         "paymentDate": fields.get("paymentDate"),
+        "paidAmount": fields.get("amountPaidCurrency"),
         "amountPaidCurrency": fields.get("amountPaidCurrency"),
+        "paymentTypeId": fields.get("paymentTypeId", 0),
     }
     return _compact_payload(payload)
 
@@ -530,6 +531,9 @@ def _register_invoice_payment(
 ) -> None:
     if invoice_id is None or not fields.get("markAsPaid"):
         return
+    fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
+    if fields.get("amountPaidCurrency") is None and fields.get("amount") is not None:
+        fields["amountPaidCurrency"] = fields.get("amount")
     response = client._request(
         "PUT",
         "/invoice/{0}/:payment".format(int(invoice_id)),
@@ -949,8 +953,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             account_number="5000",
             amount=float(fields.get("amount", 0)),
         )
-        if employee_id is not None:
-            voucher_payload["employee"] = {"id": employee_id}
         voucher_response = client.create_resource("ledger/voucher", voucher_payload)
         operations.append(
             OperationResult(name="create-payroll-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
