@@ -89,3 +89,54 @@ def test_validator_drops_invalid_customer_org_number() -> None:
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_CUSTOMER
     assert "organizationNumber" not in validated.parsed_task.fields
+
+
+def test_parse_supplier_customer_with_address() -> None:
+    parsed = parse_prompt(
+        "Registrer leverandøren Dalheim AS med organisasjonsnummer 892196753. Adressa er Parkveien 45, 5003 Bergen. E-post: faktura@dalheim.no."
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_CUSTOMER
+    assert validated.parsed_task.fields["isSupplier"] is True
+    assert validated.parsed_task.fields["organizationNumber"] == "892196753"
+    assert validated.parsed_task.fields["address"] == "Parkveien 45"
+    assert validated.parsed_task.fields["postalCode"] == "5003"
+    assert validated.parsed_task.fields["city"] == "Bergen"
+
+
+def test_parse_employee_with_birth_and_start_dates() -> None:
+    parsed = parse_prompt(
+        "Me har ein ny tilsett som heiter Arne Berge, fødd 21. December 2000. Opprett vedkomande som tilsett med e-post arne.berge@example.org og startdato 14. April 2026."
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_EMPLOYEE
+    assert validated.parsed_task.fields["birthDate"] == "2000-12-21"
+    assert validated.parsed_task.fields["startDate"] == "2026-04-14"
+
+
+def test_parse_product_with_number_and_vat() -> None:
+    parsed = parse_prompt(
+        'Opprett produktet "Analyserapport" med produktnummer 1908. Prisen er 18050 kr eksklusiv MVA, og standard MVA-sats på 25 % skal nyttast.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_PRODUCT
+    assert validated.parsed_task.fields["productNumber"] == "1908"
+    assert validated.parsed_task.fields["vatPercentage"] == 25.0
+
+
+def test_parse_invoice_with_description_and_dates() -> None:
+    parsed = parse_prompt(
+        'Créez et envoyez une facture au client Étoile SARL (nº org. 995085488) de 7250 NOK hors TVA. La facture concerne Rapport d\'analyse.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.fields["sendByEmail"] is True
+    assert validated.parsed_task.fields["orderDate"] == "2026-03-19"
+    assert validated.parsed_task.related_entities["invoice"]["description"] == "Rapport d'analyse"
+
+
+def test_parse_multi_department_prompt() -> None:
+    parsed = parse_prompt('Erstellen Sie drei Abteilungen in Tripletex: "Utvikling", "Innkjøp" und "Økonomi".')
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_DEPARTMENT
+    assert validated.parsed_task.fields["departmentNames"] == "Utvikling||Innkjøp||Økonomi"

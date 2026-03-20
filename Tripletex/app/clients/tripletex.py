@@ -102,7 +102,7 @@ class TripletexClient:
             return None
 
         query_params = {"fields": fields, "count": 200}
-        for key in ("name", "email", "first_name", "last_name"):
+        for key in ("name", "email", "first_name", "last_name", "organizationNumber", "productNumber"):
             if key in match_fields:
                 param_name = "firstName" if key == "first_name" else "lastName" if key == "last_name" else key
                 query_params[param_name] = match_fields[key]

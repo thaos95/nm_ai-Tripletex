@@ -102,6 +102,15 @@ def _sanitize_related_mapping(value: Any) -> Dict[str, Dict[str, Any]]:
     return sanitized
 
 
+def _safe_json_mapping(raw: str) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return json.loads(raw, strict=False)
+
+
 def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
     if not settings.openai_api_key:
         return None
@@ -156,9 +165,9 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
         if not output_text:
             return None
         parsed = json.loads(output_text)
-        fields = _sanitize_scalar_mapping(json.loads(parsed["fields_json"]))
-        match_fields_raw = json.loads(parsed["match_fields_json"])
-        related_entities = _sanitize_related_mapping(json.loads(parsed["related_entities_json"]))
+        fields = _sanitize_scalar_mapping(_safe_json_mapping(parsed["fields_json"]))
+        match_fields_raw = _safe_json_mapping(parsed["match_fields_json"])
+        related_entities = _sanitize_related_mapping(_safe_json_mapping(parsed["related_entities_json"]))
         match_fields = _sanitize_scalar_mapping(match_fields_raw)
         notes = list(parsed["notes"])
         if isinstance(match_fields_raw, dict):

@@ -18,6 +18,8 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
+    elif spec.get("organizationNumber"):
+        match_fields["organizationNumber"] = spec["organizationNumber"]
     elif spec.get("name"):
         match_fields["name"] = spec["name"]
 
@@ -32,6 +34,13 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
         payload["email"] = spec["email"]
     if spec.get("organizationNumber"):
         payload["organizationNumber"] = spec["organizationNumber"]
+    if spec.get("isSupplier") is not None:
+        payload["isSupplier"] = spec["isSupplier"]
+    if spec.get("isCustomer") is not None:
+        payload["isCustomer"] = spec["isCustomer"]
+    for key in ("address", "postalCode", "city", "phoneNumber"):
+        if spec.get(key):
+            payload[key] = spec[key]
     response = client.create_resource("customer", _compact_payload(payload))
     customer_id = _extract_id(response)
     operations.append(OperationResult(name="create-customer", resource_id=customer_id, payload=response))
@@ -59,6 +68,8 @@ def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations:
         "firstName": spec.get("first_name"),
         "lastName": spec.get("last_name"),
         "email": spec.get("email"),
+        "dateOfBirth": spec.get("birthDate"),
+        "dateFrom": spec.get("startDate"),
         "userType": 1,
         "department": {"id": department_id} if department_id is not None else None,
     }
@@ -97,6 +108,10 @@ def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: 
     payload = {"name": spec["name"]}
     if spec.get("priceExcludingVatCurrency") is not None:
         payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
+    if spec.get("productNumber"):
+        payload["productNumber"] = spec["productNumber"]
+    if spec.get("vatPercentage") is not None:
+        payload["vatPercentage"] = spec["vatPercentage"]
     response = client.create_resource("product", _compact_payload(payload))
     product_id = _extract_id(response)
     operations.append(OperationResult(name="create-product", resource_id=product_id, payload=response))
@@ -124,6 +139,9 @@ def _create_order(
     line = {}
     if product_id is not None:
         line["product"] = {"id": product_id}
+    description = product_spec.get("description") or parsed_fields.get("description")
+    if description:
+        line["description"] = description
     line["count"] = 1
 
     order_payload = {
@@ -153,6 +171,8 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             "firstName": fields.get("first_name"),
             "lastName": fields.get("last_name"),
             "email": fields.get("email"),
+            "dateOfBirth": fields.get("birthDate"),
+            "dateFrom": fields.get("startDate"),
             "userType": 1,
             "department": {"id": department_id} if department_id is not None else None,
         }
@@ -232,18 +252,27 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="create-project", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_DEPARTMENT:
-        payload = {
-            "name": fields.get("name"),
-            "departmentNumber": fields.get("departmentNumber"),
-        }
-        response = client.create_resource("department", _compact_payload(payload))
-        operations.append(
-            OperationResult(name="create-department", resource_id=_extract_id(response), payload=response)
-        )
+        department_names = []
+        if fields.get("departmentNames"):
+            department_names.extend([value for value in str(fields["departmentNames"]).split("||") if value])
+        elif fields.get("name"):
+            department_names.append(str(fields["name"]))
+        for department_name in department_names:
+            payload = {
+                "name": department_name,
+                "departmentNumber": fields.get("departmentNumber"),
+            }
+            response = client.create_resource("department", _compact_payload(payload))
+            operations.append(
+                OperationResult(name="create-department", resource_id=_extract_id(response), payload=response)
+            )
 
     elif task_type == TaskType.CREATE_ORDER:
         customer_spec = related.get("customer", {})
-        product_spec = related.get("product", {})
+        product_spec = dict(related.get("product", {}))
+        order_spec = dict(related.get("order", {}))
+        if order_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = order_spec["description"]
         customer_id = _resolve_customer(client, customer_spec, operations)
         if customer_id is None:
             raise TripletexClientError("Order requires resolvable customer")
@@ -253,7 +282,13 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
 
     elif task_type == TaskType.CREATE_INVOICE:
         customer_spec = related.get("customer", {})
-        product_spec = related.get("product", {})
+        product_spec = dict(related.get("product", {}))
+        invoice_spec = dict(related.get("invoice", {}))
+        order_spec = dict(related.get("order", {}))
+        if invoice_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = invoice_spec["description"]
+        if order_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = order_spec["description"]
         customer_id = _resolve_customer(client, customer_spec, operations)
         if customer_id is None:
             raise TripletexClientError("Invoice requires resolvable customer")
@@ -266,6 +301,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             "invoiceDueDate": fields.get("invoiceDueDate"),
             "customer": {"id": customer_id},
             "orders": [{"id": order_id}] if order_id is not None else [],
+            "sendByEmail": fields.get("sendByEmail"),
         }
         response = client.create_resource("invoice", _compact_payload(invoice_payload))
         operations.append(OperationResult(name="create-invoice", resource_id=_extract_id(response), payload=response))

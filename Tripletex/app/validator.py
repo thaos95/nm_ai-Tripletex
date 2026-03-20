@@ -60,7 +60,7 @@ def _normalize_travel_expense(task: ParsedTask) -> None:
 
 
 def _normalize_customer_fields(task: ParsedTask) -> None:
-    organization_number = task.fields.get("organizationNumber")
+    organization_number = task.fields.get("organizationNumber") or task.fields.pop("orgNumber", None)
     if organization_number is None:
         return
     digits_only = "".join(ch for ch in str(organization_number) if ch.isdigit())
@@ -97,17 +97,37 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         _normalize_travel_expense(normalized)
 
     allowed_fields: Dict[TaskType, Set[str]] = {
-        TaskType.CREATE_EMPLOYEE: {"first_name", "last_name", "email", "employee_type"},
+        TaskType.CREATE_EMPLOYEE: {"first_name", "last_name", "email", "employee_type", "birthDate", "startDate"},
         TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
         TaskType.LIST_EMPLOYEES: {"fields", "count"},
-        TaskType.CREATE_CUSTOMER: {"name", "email", "isCustomer", "organizationNumber", "phoneNumber"},
+        TaskType.CREATE_CUSTOMER: {
+            "name",
+            "email",
+            "isCustomer",
+            "isSupplier",
+            "organizationNumber",
+            "phoneNumber",
+            "address",
+            "postalCode",
+            "city",
+        },
         TaskType.UPDATE_CUSTOMER: {"phoneNumber", "email"},
         TaskType.SEARCH_CUSTOMERS: {"fields", "count"},
-        TaskType.CREATE_PRODUCT: {"name", "priceExcludingVatCurrency"},
+        TaskType.CREATE_PRODUCT: {"name", "priceExcludingVatCurrency", "productNumber", "vatPercentage"},
         TaskType.CREATE_PROJECT: {"name", "startDate"},
-        TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber"},
+        TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber", "departmentNames"},
         TaskType.CREATE_ORDER: {"orderDate", "deliveryDate"},
-        TaskType.CREATE_INVOICE: {"invoiceDate", "invoiceDueDate", "amount"},
+        TaskType.CREATE_INVOICE: {
+            "invoiceDate",
+            "invoiceDueDate",
+            "orderDate",
+            "deliveryDate",
+            "amount",
+            "sendByEmail",
+            "markAsPaid",
+            "paymentDate",
+            "amountPaidCurrency",
+        },
         TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "distance"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
         TaskType.DELETE_VOUCHER: {"voucher_id"},
@@ -133,6 +153,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
     if normalized.task_type == TaskType.CREATE_CUSTOMER:
         if not normalized.fields.get("name"):
             return ValidationResult(normalized, blocking_error="Customer creation requires customer name")
+        normalized.match_fields.setdefault("organizationNumber", normalized.fields.get("organizationNumber"))
 
     if normalized.task_type == TaskType.UPDATE_CUSTOMER:
         if not normalized.match_fields:

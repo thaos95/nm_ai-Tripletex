@@ -115,6 +115,46 @@ def mock_transport() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+def recording_transport(recorded: dict) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v2/department":
+            return httpx.Response(200, json={"values": [{"id": 1, "name": "Main"}]})
+
+        if request.method == "GET" and request.url.path == "/v2/customer":
+            return httpx.Response(200, json={"values": [{"id": 2001, "name": "Acme AS"}]})
+
+        if request.method == "GET" and request.url.path == "/v2/product":
+            return httpx.Response(200, json={"values": []})
+
+        if request.method == "POST" and request.url.path == "/v2/customer":
+            recorded["customer_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 2001}})
+
+        if request.method == "POST" and request.url.path == "/v2/product":
+            recorded["product_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 3001}})
+
+        if request.method == "POST" and request.url.path == "/v2/employee":
+            recorded["employee_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 1001}})
+
+        if request.method == "POST" and request.url.path == "/v2/order":
+            recorded["order_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 5001}})
+
+        if request.method == "POST" and request.url.path == "/v2/invoice":
+            recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 6001}})
+
+        if request.method == "POST" and request.url.path == "/v2/department":
+            recorded.setdefault("department_payloads", []).append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(200, json={"value": {"id": len(recorded["department_payloads"])}})
+
+        return httpx.Response(404, json={"error": {"message": "not found"}})
+
+    return httpx.MockTransport(handler)
+
+
 def test_solve_create_employee() -> None:
     app.dependency_overrides[get_client_transport] = mock_transport
     client = TestClient(app)
@@ -504,3 +544,97 @@ def test_solve_rejects_invalid_json_body() -> None:
         headers={"Content-Type": "application/json"},
     )
     assert response.status_code == 422
+
+
+def test_solve_create_customer_preserves_supplier_and_address_fields() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Registrer leverandøren Dalheim AS med organisasjonsnummer 892196753. Adressa er Parkveien 45, 5003 Bergen. E-post: faktura@dalheim.no.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["customer_payload"]["isSupplier"] is True
+    assert recorded["customer_payload"]["organizationNumber"] == "892196753"
+    assert recorded["customer_payload"]["address"] == "Parkveien 45"
+    assert recorded["customer_payload"]["postalCode"] == "5003"
+    assert recorded["customer_payload"]["city"] == "Bergen"
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_employee_preserves_birth_and_start_dates() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Wir haben einen neuen Mitarbeiter namens Leonie Becker, geboren am 17. January 1996. Bitte legen Sie ihn als Mitarbeiter mit der E-Mail leonie.becker@example.org und dem Startdatum 12. January 2026 an.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["employee_payload"]["dateOfBirth"] == "1996-01-17"
+    assert recorded["employee_payload"]["dateFrom"] == "2026-01-12"
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_product_preserves_number_and_vat() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Opprett produktet "Havregryn" med produktnummer 3113. Prisen er 29250 kr eksklusiv MVA, og MVA-sats for næringsmiddel på 15 % skal nyttast.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["product_payload"]["productNumber"] == "3113"
+    assert recorded["product_payload"]["vatPercentage"] == 15.0
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_invoice_uses_description_when_product_missing() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Créez et envoyez une facture au client Étoile SARL (nº org. 995085488) de 7250 NOK hors TVA. La facture concerne Rapport d'analyse.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Rapport d'analyse"
+    assert recorded["order_payload"]["orderDate"] == "2026-03-19"
+    assert recorded["order_payload"]["deliveryDate"] == "2026-03-19"
+    assert recorded["invoice_payload"]["sendByEmail"] is True
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_multiple_departments() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Erstellen Sie drei Abteilungen in Tripletex: "Utvikling", "Innkjøp" und "Økonomi".',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert [item["name"] for item in recorded["department_payloads"]] == ["Utvikling", "Innkjøp", "Økonomi"]
+    app.dependency_overrides.clear()

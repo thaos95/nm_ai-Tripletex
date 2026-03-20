@@ -1,4 +1,6 @@
 import re
+import unicodedata
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from app.llm_parser import parse_prompt_with_llm
@@ -13,13 +15,28 @@ NUMBER_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 
-CREATE_WORDS = ["opprett", "registrer", "lag", "create", "crear", "criar", "erstellen", "creer"]
+CREATE_WORDS = [
+    "opprett",
+    "registrer",
+    "lag",
+    "create",
+    "crear",
+    "criar",
+    "erstellen",
+    "creer",
+    "créez",
+    "creez",
+    "registre",
+    "registrieren",
+    "anlegen",
+    "legen sie",
+]
 UPDATE_WORDS = ["oppdater", "endre", "set", "update", "actualizar", "aktualisieren", "mettre"]
 DELETE_WORDS = ["slett", "fjern", "delete", "remove", "borrar", "excluir", "loschen", "supprimer"]
 READ_WORDS = ["hent", "list", "liste", "finn", "find", "show", "vis", "search", "sok", "søk", "buscar", "chercher"]
 
 ENTITY_KEYWORDS = {
-    "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe"],
+    "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe", "tilsett", "tilsatt"],
     "customer": ["kunde", "customer", "cliente", "kund", "client"],
     "product": ["produkt", "product", "producto", "produto"],
     "project": ["prosjekt", "project", "proyecto", "projekt", "projet"],
@@ -38,9 +55,24 @@ ROLE_MAP = {
     "account manager": "ACCOUNT_MANAGER",
 }
 
+MONTH_MAP = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
 
 def _language_hint(prompt: str) -> str:
-    lowered = prompt.lower()
+    lowered = _normalized_text(prompt)
     if any(word in lowered for word in ["opprett", "ansatt", "kunde", "reiseregning", "avdeling"]):
         return "nb"
     if any(word in lowered for word in ["create", "employee", "customer", "travel expense"]):
@@ -58,6 +90,12 @@ def _language_hint(prompt: str) -> str:
 
 def _contains_any(text: str, options: List[str]) -> bool:
     return any(option in text for option in options)
+
+
+def _normalized_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_text.lower()
 
 
 def _detect_action(lowered: str) -> Optional[str]:
@@ -116,7 +154,7 @@ def _extract_named_entity(prompt: str, keywords: List[str]) -> Optional[str]:
         return _clean_name(quoted_match.group(1))
 
     plain_pattern = re.compile(
-        r"(?:{0})(?:\s+(?:med|named|name|kalt|called|for))?\s+([A-ZÆØÅ][^,\.\n]+)".format(keyword_pattern),
+        r"(?:{0})(?:\s+(?:med|named|name|kalt|called|for))?\s+([A-ZÆØÅÉÜÖÄ][^,\.\n]+)".format(keyword_pattern),
         re.IGNORECASE,
     )
     plain_match = plain_pattern.search(prompt)
@@ -156,8 +194,8 @@ def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
 
 def _extract_project_customer_name(prompt: str) -> Optional[str]:
     patterns = [
-        r"(?:linked to the customer|for kunde|for kunden|knyttet til kunden|knyttet til kunde)\s+([A-Z][^,(.\n]+)",
-        r"(?:customer|kunde|kunden|client|cliente)\s+([A-Z][^,(.\n]+)",
+        r"(?:linked to the customer|for kunde|for kunden|knyttet til kunden|knyttet til kunde)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
+        r"(?:customer|kunde|kunden|client|cliente)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
     ]
     for pattern in patterns:
         match = re.search(pattern, prompt, re.IGNORECASE)
@@ -167,7 +205,8 @@ def _extract_project_customer_name(prompt: str) -> Optional[str]:
 
 
 def _extract_amount(prompt: str) -> Optional[float]:
-    amount = _first_match(NUMBER_RE, prompt)
+    currency_match = re.search(r"(\d+(?:[.,]\d{1,2})?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)
+    amount = currency_match.group(1) if currency_match else _first_match(NUMBER_RE, prompt)
     if amount is None:
         return None
     return float(amount.replace(",", "."))
@@ -200,24 +239,120 @@ def _extract_numeric_id(prompt: str) -> Optional[int]:
 
 def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     related_entities = {}
-    customer_name = _extract_named_entity(prompt, ["kunde", "customer", "cliente", "client"])
+    customer_name = _extract_project_customer_name(prompt)
     product_name = _extract_named_entity(prompt, ["produkt", "product", "producto", "produto"])
     if customer_name:
         related_entities["customer"] = {"name": customer_name, "isCustomer": True}
+        org_number = _extract_org_number(prompt)
+        if org_number:
+            related_entities["customer"]["organizationNumber"] = org_number
     if product_name:
         related_entities["product"] = {"name": product_name}
     return related_entities
 
 
 def _extract_org_number(prompt: str) -> Optional[str]:
-    match = re.search(r"(?:org(?:anization)?\s*no\.?|orgnr\.?|org\.nr\.?)\s*(\d{9})", prompt, re.IGNORECASE)
+    match = re.search(r"(?:org(?:anization)?\s*no\.?|orgnr\.?|org\.nr\.?|organisasjonsnummer)\s*(\d{9})", prompt, re.IGNORECASE)
     if match:
         return match.group(1)
     return None
 
 
+def _extract_textual_dates(prompt: str) -> List[str]:
+    matches = re.findall(r"(\d{1,2})\.\s*([A-Za-z]+)\s+(\d{4})", prompt)
+    dates: List[str] = []
+    for day, month_name, year in matches:
+        month = MONTH_MAP.get(month_name.lower())
+        if not month:
+            continue
+        try:
+            parsed = datetime(int(year), month, int(day))
+        except ValueError:
+            continue
+        dates.append(parsed.strftime("%Y-%m-%d"))
+    return dates
+
+
+def _extract_address_fields(prompt: str) -> Dict[str, str]:
+    patterns = [
+        r"(?:addressen er|adressa er|o endere[cç]o [ée]|l'adresse est|adresse ist|address is)\s+([^,.\n]+),\s*(\d{4})\s+([A-Za-zÆØÅæøåÉéÜüÖöÄä\- ]+)",
+        r"(?:adresse|address)\s*:\s*([^,.\n]+),\s*(\d{4})\s+([A-Za-zÆØÅæøåÉéÜüÖöÄä\- ]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return {
+                "address": match.group(1).strip(),
+                "postalCode": match.group(2).strip(),
+                "city": match.group(3).strip(" ."),
+            }
+    return {}
+
+
+def _extract_employee_name(prompt: str) -> Tuple[Optional[str], Optional[str]]:
+    patterns = [
+        r"(?:navn|named|called|chamado|namens|heiter|heter)\s+([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
+        r"(?:employee|ansatt|funcion[aá]rio|mitarbeiter|tilsett|employ[ée])(?:\s+med\s+navn)?\s+([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _split_person_name(_clean_name(match.group(1)))
+    return None, None
+
+
+def _extract_customer_name(prompt: str) -> Optional[str]:
+    customer_name = _extract_project_customer_name(prompt)
+    if customer_name:
+        return customer_name
+    supplier_patterns = [
+        r"(?:leverand[^\s]*|supplier|vendor|fornecedor|fournisseur|lieferanten?)\s+([A-ZÆØÅÉÜÖÄ][^,.\n]+)",
+    ]
+    for pattern in supplier_patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return None
+
+
+def _extract_product_number(prompt: str) -> Optional[str]:
+    match = re.search(r"(?:produktnummer|product number|n[uú]mero de producto|numero do produto)\s+(\d+)", prompt, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_vat_percentage(prompt: str) -> Optional[float]:
+    match = re.search(r"(\d{1,2}(?:[.,]\d+)?)\s*%", prompt)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def _extract_department_names(prompt: str) -> List[str]:
+    names = [name.strip() for name in QUOTED_RE.findall(prompt) if name.strip()]
+    if names:
+        return names
+    name = _extract_named_entity(prompt, ["avdeling", "department", "departamento", "abteilung"])
+    return [name] if name else []
+
+
+def _extract_invoice_description(prompt: str) -> Optional[str]:
+    quoted = QUOTED_RE.findall(prompt)
+    if quoted:
+        return quoted[-1].strip()
+    patterns = [
+        r"(?:concerne|gjelder|betrifft|for)\s+([A-ZÆØÅÉ][^.\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return None
+
+
 def parse_prompt_rule_based(prompt: str) -> ParsedTask:
-    lowered = prompt.lower()
+    lowered = _normalized_text(prompt)
     action = _detect_action(lowered)
     entity = _detect_entity(lowered)
     fields = _extract_common_fields(prompt)
@@ -225,15 +360,33 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     match_fields = {}
     notes = []
 
+    supplier_detected = any(
+        token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant"]
+    )
+    if supplier_detected:
+        entity = "customer"
+        action = "create"
+    if "tilsett" in lowered or "tilsatt" in lowered:
+        entity = "employee"
+    if not supplier_detected and any(token in lowered for token in ["invoice", "facture", "faktura", "rechnung"]) and any(
+        token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"]
+    ):
+        entity = "invoice"
+        action = "create"
     if "project" in lowered or "prosjekt" in lowered:
         entity = "project"
 
     if entity == "employee" and action == "create":
-        first_name, last_name = _split_person_name(_extract_named_entity(prompt, ["navn"]))
+        first_name, last_name = _extract_employee_name(prompt)
         if first_name:
             fields["first_name"] = first_name
         if last_name:
             fields["last_name"] = last_name
+        textual_dates = _extract_textual_dates(prompt)
+        if textual_dates:
+            fields["birthDate"] = textual_dates[0]
+        if len(textual_dates) > 1:
+            fields["startDate"] = textual_dates[1]
         for token, role in ROLE_MAP.items():
             if token in lowered:
                 fields["employee_type"] = role
@@ -246,7 +399,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "employee" and action == "update":
-        first_name, last_name = _split_person_name(_extract_named_entity(prompt, ["ansatt", "employee", "navn"]))
+        first_name, last_name = _extract_employee_name(prompt)
         if first_name:
             match_fields["first_name"] = first_name
         if last_name:
@@ -274,14 +427,23 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "customer" and action == "create":
-        customer_name = _extract_project_customer_name(prompt)
+        customer_name = _extract_customer_name(prompt)
         fields["name"] = customer_name or "Unknown Customer"
         fields["isCustomer"] = True
+        org_number = _extract_org_number(prompt)
+        if org_number:
+            fields["organizationNumber"] = org_number
+            match_fields["organizationNumber"] = org_number
+        if supplier_detected:
+            fields["isSupplier"] = True
+            fields["isCustomer"] = False
+        fields.update(_extract_address_fields(prompt))
         return ParsedTask(
             task_type=TaskType.CREATE_CUSTOMER,
             confidence=0.86,
             language_hint=_language_hint(prompt),
             fields=fields,
+            match_fields=match_fields,
         )
 
     if entity == "customer" and action == "update":
@@ -321,11 +483,19 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         amount = _extract_amount(prompt)
         if amount is not None:
             fields["priceExcludingVatCurrency"] = amount
+        product_number = _extract_product_number(prompt)
+        if product_number:
+            fields["productNumber"] = product_number
+            match_fields["productNumber"] = product_number
+        vat_percentage = _extract_vat_percentage(prompt)
+        if vat_percentage is not None:
+            fields["vatPercentage"] = vat_percentage
         return ParsedTask(
             task_type=TaskType.CREATE_PRODUCT,
             confidence=0.82,
             language_hint=_language_hint(prompt),
             fields=fields,
+            match_fields=match_fields,
         )
 
     if entity == "project" and action == "create":
@@ -357,8 +527,10 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "department" and action == "create":
-        department_name = _extract_named_entity(prompt, ["avdeling", "department", "departamento", "abteilung"])
-        fields["name"] = department_name or "Unknown Department"
+        department_names = _extract_department_names(prompt)
+        fields["name"] = department_names[0] if department_names else "Unknown Department"
+        if len(department_names) > 1:
+            fields["departmentNames"] = "||".join(department_names)
         number = _extract_amount(prompt)
         if number is not None and number.is_integer():
             fields["departmentNumber"] = str(int(number))
@@ -431,10 +603,14 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
     if entity == "order" and action == "create":
         fields["orderDate"] = fields.get("date") or "2026-03-19"
+        fields["deliveryDate"] = fields.get("date") or fields["orderDate"]
         related_entities = _extract_invoice_entities(prompt)
         amount = _extract_amount(prompt)
         if amount is not None and "product" in related_entities:
             related_entities["product"]["priceExcludingVatCurrency"] = amount
+        description = _extract_invoice_description(prompt)
+        if description:
+            related_entities.setdefault("order", {})["description"] = description
         return ParsedTask(
             task_type=TaskType.CREATE_ORDER,
             confidence=0.74,
@@ -446,12 +622,27 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if entity == "invoice" and action == "create":
         fields["invoiceDate"] = fields.get("date") or "2026-03-19"
         fields["invoiceDueDate"] = fields.get("date") or "2026-03-19"
+        fields["orderDate"] = fields["invoiceDate"]
+        fields["deliveryDate"] = fields["invoiceDate"]
         related_entities = _extract_invoice_entities(prompt)
         amount = _extract_amount(prompt)
         if amount is not None:
             fields["amount"] = amount
             if "product" in related_entities:
                 related_entities["product"]["priceExcludingVatCurrency"] = amount
+            else:
+                related_entities.setdefault("invoice", {})["amountExcludingVatCurrency"] = amount
+        description = _extract_invoice_description(prompt)
+        if description:
+            related_entities.setdefault("invoice", {})["description"] = description
+            related_entities.setdefault("order", {})["description"] = description
+        if any(token in lowered for token in ["send", "envoy", "sendez"]):
+            fields["sendByEmail"] = True
+        if any(token in lowered for token in ["betaling", "pago", "zahlung", "payment"]):
+            fields["markAsPaid"] = True
+            fields["paymentDate"] = fields["invoiceDate"]
+            if amount is not None:
+                fields["amountPaidCurrency"] = amount
         return ParsedTask(
             task_type=TaskType.CREATE_INVOICE,
             confidence=0.79,
@@ -473,13 +664,19 @@ def parse_prompt(prompt: str) -> ParsedTask:
     llm_parsed = parse_prompt_with_llm(prompt)
     rule_based = parse_prompt_rule_based(prompt)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
-        if llm_parsed.task_type == TaskType.CREATE_PROJECT and rule_based.task_type == TaskType.CREATE_PROJECT:
-            if "name" not in llm_parsed.fields and "name" in rule_based.fields:
-                llm_parsed.fields["name"] = rule_based.fields["name"]
-            if "startDate" not in llm_parsed.fields and "startDate" in rule_based.fields:
-                llm_parsed.fields["startDate"] = rule_based.fields["startDate"]
+        if llm_parsed.task_type == rule_based.task_type:
+            for key, value in rule_based.fields.items():
+                if key not in llm_parsed.fields:
+                    llm_parsed.fields[key] = value
+            for key, value in rule_based.match_fields.items():
+                if key not in llm_parsed.match_fields:
+                    llm_parsed.match_fields[key] = value
             for key, value in rule_based.related_entities.items():
                 if key not in llm_parsed.related_entities:
                     llm_parsed.related_entities[key] = value
+                else:
+                    for nested_key, nested_value in value.items():
+                        if nested_key not in llm_parsed.related_entities[key]:
+                            llm_parsed.related_entities[key][nested_key] = nested_value
         return llm_parsed
     return rule_based
