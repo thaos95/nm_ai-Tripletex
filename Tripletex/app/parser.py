@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
 from app.llm_parser import parse_prompt_with_llm
@@ -74,6 +74,10 @@ MONTH_MAP = {
     "november": 11,
     "december": 12,
 }
+
+
+def _today_iso() -> str:
+    return date.today().isoformat()
 
 
 def _language_hint(prompt: str) -> str:
@@ -171,7 +175,7 @@ def _extract_named_entity(prompt: str, keywords: List[str]) -> Optional[str]:
 
 def _extract_project_manager_name(prompt: str) -> Optional[str]:
     alt_match = re.search(
-        r"(?:director del proyecto|gerente de projeto)\s+(?:es\s+|e\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)",
+        r"(?:director del proyecto|gerente de projeto)\s+(?:(?:es|e|é)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)",
         prompt,
         re.IGNORECASE,
     )
@@ -197,7 +201,7 @@ def _split_person_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str
 
 
 def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
-    alt_pattern = r"(?:director del proyecto|gerente de projeto)\s+(?:(?:es|e)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)"
+    alt_pattern = r"(?:director del proyecto|gerente de projeto)\s+(?:(?:es|e|é)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)"
     alt_match = re.search(alt_pattern, prompt, re.IGNORECASE)
     if alt_match:
         return _clean_name(alt_match.group(1))
@@ -206,6 +210,20 @@ def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
     if match:
         return _clean_name(match.group(1))
     return _extract_project_manager_name(prompt)
+
+
+def _extract_project_manager_name_safe(prompt: str) -> Optional[str]:
+    patterns = [
+        r"(?:director del proyecto|gerente de projeto)\s+(?:is\s+|es\s+|er\s+|e\s+)?([^(\n.]+)",
+        r"(?:project manager|prosjektleder)\s+(?:is\s+|er\s+)?([^(\n.]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            candidate = _clean_name(match.group(1))
+            if candidate:
+                return candidate
+    return _extract_project_manager_name_v2(prompt)
 
 
 def _extract_project_customer_name(prompt: str) -> Optional[str]:
@@ -272,7 +290,7 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
 
 def _extract_org_number(prompt: str) -> Optional[str]:
     match = re.search(
-        r"(?:org(?:anization)?\.?\s*(?:no\.?|n\S?\.?)|org[\.\-\s]*nr\.?|organisasjonsnummer)\s*(\d{9})",
+        r"(?:organization number|organisasjonsnummer|org(?:anization)?\.?\s*(?:no\.?|n\S?\.?)|org[\.\-\s]*nr\.?|numero de organizacao|numero de organizac?ao|numero d'organisation|numero dorganisation|num[eé]ro d'organisation|num[eé]ro dorganisation|n\S?\s*org\.?)\s*(\d{9})",
         prompt,
         re.IGNORECASE,
     )
@@ -584,14 +602,14 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if entity == "project" and action == "create":
         project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projeto", "projekt"])
         fields["name"] = project_name or "Unknown Project"
-        fields["startDate"] = fields.get("date") or "2026-03-19"
+        fields["startDate"] = fields.get("date") or _today_iso()
         customer_name = _extract_project_customer_name(prompt)
         if customer_name:
             related_entities["customer"] = {"name": customer_name, "isCustomer": True}
             org_number = _extract_org_number(prompt)
             if org_number:
                 related_entities["customer"]["organizationNumber"] = org_number
-        manager_name = _extract_project_manager_name_v2(prompt)
+        manager_name = _extract_project_manager_name_safe(prompt)
         if manager_name:
             manager_first_name, manager_last_name = _split_person_name(manager_name)
             related_entities["project_manager"] = {}
@@ -685,7 +703,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "order" and action == "create":
-        fields["orderDate"] = fields.get("date") or "2026-03-19"
+        fields["orderDate"] = fields.get("date") or _today_iso()
         fields["deliveryDate"] = fields.get("date") or fields["orderDate"]
         related_entities = _extract_invoice_entities(prompt)
         amount = _extract_amount(prompt)
@@ -705,8 +723,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "invoice" and action == "create":
-        fields["invoiceDate"] = fields.get("date") or "2026-03-19"
-        fields["invoiceDueDate"] = fields.get("date") or "2026-03-19"
+        fields["invoiceDate"] = fields.get("date") or _today_iso()
+        fields["invoiceDueDate"] = fields.get("date") or _today_iso()
         fields["orderDate"] = fields["invoiceDate"]
         fields["deliveryDate"] = fields["invoiceDate"]
         related_entities = _extract_invoice_entities(prompt)

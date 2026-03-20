@@ -1,6 +1,11 @@
+from datetime import date
+
 from app.parser import parse_prompt
 from app.schemas import TaskType
 from app.validator import validate_and_normalize_task
+
+
+TODAY_ISO = date.today().isoformat()
 
 
 def test_parse_create_employee_prompt() -> None:
@@ -131,7 +136,7 @@ def test_parse_invoice_with_description_and_dates() -> None:
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
     assert validated.parsed_task.fields["sendByEmail"] is True
-    assert validated.parsed_task.fields["orderDate"] == "2026-03-19"
+    assert validated.parsed_task.fields["orderDate"] == TODAY_ISO
     assert validated.parsed_task.related_entities["invoice"]["description"] == "Rapport d'analyse"
 
 
@@ -153,7 +158,7 @@ def test_parse_payment_prompt_maps_to_invoice_flow() -> None:
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
     assert validated.parsed_task.fields["markAsPaid"] is True
-    assert validated.parsed_task.fields["paymentDate"] == "2026-03-19"
+    assert validated.parsed_task.fields["paymentDate"] == TODAY_ISO
     assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "830362894"
     assert validated.parsed_task.related_entities["invoice"]["description"] == "System Development"
 

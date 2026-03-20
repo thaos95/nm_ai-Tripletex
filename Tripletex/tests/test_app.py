@@ -1,11 +1,15 @@
 import base64
 import json
+from datetime import date
 
 import httpx
 from fastapi.testclient import TestClient
 
 from app.main import app, get_client_transport
 from app.config import settings
+
+
+TODAY_ISO = date.today().isoformat()
 
 
 def mock_transport() -> httpx.MockTransport:
@@ -637,9 +641,10 @@ def test_solve_create_invoice_uses_description_when_product_missing() -> None:
     )
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Rapport d'analyse"
-    assert recorded["order_payload"]["orderDate"] == "2026-03-19"
-    assert recorded["order_payload"]["deliveryDate"] == "2026-03-19"
-    assert recorded["invoice_payload"]["sendByEmail"] is True
+    assert recorded["order_payload"]["orderDate"] == TODAY_ISO
+    assert recorded["order_payload"]["deliveryDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
+    assert "sendByEmail" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 
@@ -674,7 +679,10 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     )
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "System Development"
-    assert recorded["invoice_payload"]["invoiceDate"] == "2026-03-19"
+    assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
     app.dependency_overrides.clear()
 
 
@@ -692,7 +700,10 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     )
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Desenvolvimento de sistemas"
-    assert recorded["invoice_payload"]["invoiceDate"] == "2026-03-19"
+    assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 30450.0
     app.dependency_overrides.clear()
 
 
