@@ -23,6 +23,8 @@ CREATE_WORDS = [
     "crea",
     "crear",
     "criar",
+    "crie",
+    "cree",
     "erstellen",
     "creer",
     "créez",
@@ -42,7 +44,7 @@ ENTITY_KEYWORDS = {
     "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe", "tilsett", "tilsatt"],
     "customer": ["kunde", "customer", "cliente", "kund", "client"],
     "product": ["produkt", "product", "producto", "produto"],
-    "project": ["prosjekt", "project", "proyecto", "projekt", "projet"],
+    "project": ["prosjekt", "project", "proyecto", "projeto", "projekt", "projet"],
     "department": ["avdeling", "department", "departamento", "abteilung", "departement"],
     "invoice": ["faktura", "invoice", "factura", "fatura", "rechnung", "facture"],
     "order": ["ordre", "order", "pedido", "bestellung", "commande"],
@@ -168,6 +170,13 @@ def _extract_named_entity(prompt: str, keywords: List[str]) -> Optional[str]:
 
 
 def _extract_project_manager_name(prompt: str) -> Optional[str]:
+    alt_match = re.search(
+        r"(?:director del proyecto|gerente de projeto)\s+(?:es\s+|e\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)",
+        prompt,
+        re.IGNORECASE,
+    )
+    if alt_match:
+        return _clean_name(alt_match.group(1))
     match = re.search(
         r"(?:project manager|prosjektleder)\s+(?:is\s+)?([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
         prompt,
@@ -188,6 +197,10 @@ def _split_person_name(name: Optional[str]) -> Tuple[Optional[str], Optional[str
 
 
 def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
+    alt_pattern = r"(?:director del proyecto|gerente de projeto)\s+(?:(?:es|e)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)"
+    alt_match = re.search(alt_pattern, prompt, re.IGNORECASE)
+    if alt_match:
+        return _clean_name(alt_match.group(1))
     pattern = r"(?:project manager|prosjektleder)\s+(?:(?:is|er)\s+)?([A-Z][\w.\-]+(?:\s+[A-Z][\w.\-]+)+)"
     match = re.search(pattern, prompt, re.IGNORECASE)
     if match:
@@ -196,6 +209,9 @@ def _extract_project_manager_name_v2(prompt: str) -> Optional[str]:
 
 
 def _extract_project_customer_name(prompt: str) -> Optional[str]:
+    alt_match = re.search(r"(?:vinculado al cliente|vinculado ao cliente)\s+([A-Z][^,(.\n]+)", prompt, re.IGNORECASE)
+    if alt_match:
+        return _clean_name(alt_match.group(1))
     patterns = [
         r"(?:linked to the customer|for kunde|for kunden|knyttet til kunden|knyttet til kunde)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
         r"(?:customer|kunde|kunden|client|cliente)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
@@ -434,7 +450,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     ):
         entity = "invoice"
         action = "create"
-    if "project" in lowered or "prosjekt" in lowered:
+    if "project" in lowered or "prosjekt" in lowered or "projeto" in lowered or "proyecto" in lowered:
         entity = "project"
 
     if entity == "employee" and action == "create":
@@ -566,7 +582,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         )
 
     if entity == "project" and action == "create":
-        project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projekt"])
+        project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projeto", "projekt"])
         fields["name"] = project_name or "Unknown Project"
         fields["startDate"] = fields.get("date") or "2026-03-19"
         customer_name = _extract_project_customer_name(prompt)

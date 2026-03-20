@@ -97,6 +97,36 @@ def _resolve_fallback_project_manager(client: TripletexClient, operations: list)
     return None
 
 
+def _resolve_project_manager(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
+    if not spec:
+        return None
+
+    match_fields = {}
+    if spec.get("email"):
+        match_fields["email"] = spec["email"]
+    if spec.get("first_name"):
+        match_fields["first_name"] = spec["first_name"]
+    if spec.get("last_name"):
+        match_fields["last_name"] = spec["last_name"]
+    if not match_fields and spec.get("name"):
+        name_parts = str(spec["name"]).split()
+        if name_parts:
+            match_fields["first_name"] = name_parts[0]
+        if len(name_parts) > 1:
+            match_fields["last_name"] = " ".join(name_parts[1:])
+
+    if not match_fields:
+        return _resolve_fallback_project_manager(client, operations)
+
+    employee = client.find_single("employee", match_fields, fields="id,firstName,lastName,employments,*")
+    if employee and employee.get("employments"):
+        employee_id = employee["id"]
+        operations.append(OperationResult(name="resolve-project-manager", resource_id=employee_id, payload=employee))
+        return employee_id
+
+    return _resolve_fallback_project_manager(client, operations)
+
+
 def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
     match_fields = {}
     if spec.get("name"):
@@ -240,9 +270,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id = _resolve_customer(client, customer_spec, operations)
             if customer_id is not None:
                 payload["customer"] = {"id": customer_id}
-        manager_spec = related.get("project_manager")
+        manager_spec = (
+            related.get("project_manager")
+            or related.get("projectManager")
+            or related.get("projectLeader")
+            or related.get("employee")
+        )
         if manager_spec:
-            manager_id = _resolve_employee(client, manager_spec, operations)
+            manager_id = _resolve_project_manager(client, manager_spec, operations)
             if manager_id is not None:
                 payload["projectManager"] = {"id": manager_id}
         try:
