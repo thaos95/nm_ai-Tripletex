@@ -78,7 +78,6 @@ def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations:
         "lastName": spec.get("last_name"),
         "email": spec.get("email"),
         "dateOfBirth": spec.get("birthDate"),
-        "dateFrom": spec.get("startDate"),
         "userType": 1,
         "department": {"id": department_id} if department_id is not None else None,
     }
@@ -174,7 +173,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             "lastName": fields.get("last_name"),
             "email": fields.get("email"),
             "dateOfBirth": fields.get("birthDate"),
-            "dateFrom": fields.get("startDate"),
             "userType": 1,
             "department": {"id": department_id} if department_id is not None else None,
         }

@@ -581,7 +581,25 @@ def test_solve_create_employee_preserves_birth_and_start_dates() -> None:
     )
     assert response.status_code == 200
     assert recorded["employee_payload"]["dateOfBirth"] == "1996-01-17"
-    assert recorded["employee_payload"]["dateFrom"] == "2026-01-12"
+    assert "dateFrom" not in recorded["employee_payload"]
+    app.dependency_overrides.clear()
+
+
+def test_solve_create_employee_omits_proxy_invalid_start_date_field() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Me har ein ny tilsett som heiter Geir Stolsvik, fodd 6. March 1990. Opprett vedkomande som tilsett med e-post geir.stlsvik@example.org og startdato 14. November 2026.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["employee_payload"]["dateOfBirth"] == "1990-03-06"
+    assert "dateFrom" not in recorded["employee_payload"]
     app.dependency_overrides.clear()
 
 
