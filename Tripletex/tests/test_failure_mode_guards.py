@@ -61,3 +61,16 @@ def test_validator_blocks_payroll_voucher_without_amount() -> None:
     validated = validate_and_normalize_task(task)
 
     assert validated.blocking_error == "Payroll voucher requires salary amount"
+
+
+def test_validator_blocks_payroll_voucher_even_with_amount_due_to_contract_risk() -> None:
+    task = ParsedTask(
+        task_type=TaskType.CREATE_PAYROLL_VOUCHER,
+        confidence=1.0,
+        fields={"date": "2026-03-20", "amount": 45000.0, "email": "emma.stone@example.org"},
+        related_entities={"employee": {"email": "emma.stone@example.org"}},
+    )
+
+    validated = validate_and_normalize_task(task)
+
+    assert validated.blocking_error == "Payroll voucher fallback is not supported safely with the current Tripletex contract"

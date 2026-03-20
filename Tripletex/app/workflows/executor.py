@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
@@ -537,7 +537,7 @@ def _register_invoice_payment(
     response = client._request(
         "PUT",
         "/invoice/{0}/:payment".format(int(invoice_id)),
-        json=_build_invoice_payment_payload(fields),
+        params=_build_invoice_payment_payload(fields),
     )
     operations.append(
         OperationResult(name="register-invoice-payment", resource_id=int(invoice_id), payload=response)
@@ -557,7 +557,21 @@ def _resolve_credit_note_invoice(
         or related.get("product", {}).get("description")
     )
     target_amount = abs(float(fields["amount"])) if fields.get("amount") is not None else None
-    response = client.list_resource("invoice", fields="*", count=200, customerId=customer_id)
+    invoice_date_to = fields.get("invoiceDate") or _today_iso()
+    invoice_date_from = fields.get("invoiceDateFrom")
+    if invoice_date_from is None:
+        try:
+            invoice_date_from = (date.fromisoformat(str(invoice_date_to)) - timedelta(days=3650)).isoformat()
+        except ValueError:
+            invoice_date_from = "2016-01-01"
+    response = client.list_resource(
+        "invoice",
+        fields="*",
+        count=200,
+        customerId=customer_id,
+        invoiceDateFrom=invoice_date_from,
+        invoiceDateTo=invoice_date_to,
+    )
     values = response.get("values", [])
 
     def _candidate_customer_id(candidate: Dict[str, Any]) -> Optional[int]:

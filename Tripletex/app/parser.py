@@ -158,6 +158,12 @@ PAYMENT_REVERSAL_TOKENS = [
     "utestaande belop",
     "utestaende belop",
     "outstanding amount",
+    "zuruckgebucht",
+    "zuruck gebucht",
+    "zurückgebucht",
+    "stornieren sie die zahlung",
+    "cancel the payment",
+    "annuler le paiement",
 ]
 
 SUPPLIER_INVOICE_TOKENS = [
@@ -646,6 +652,18 @@ def _extract_project_customer_name_billing_safe(prompt: str) -> Optional[str]:
     match = re.search(r'im\s+projekt\s+[\'"][^\'"]+[\'"]\s+fur\s+([^,(.\n]+)\s+\((?:org)', normalized_prompt)
     if match:
         return _clean_name(match.group(1))
+    portuguese_match = re.search(
+        r'(?:no projeto|do projeto)\s+[\'"][^\'"]+[\'"]\s+para\s+([^,(.\n]+)\s+\((?:org)',
+        normalized_prompt,
+    )
+    if portuguese_match:
+        return _clean_name(portuguese_match.group(1))
+    spanish_match = re.search(
+        r'(?:del proyecto|en el proyecto)\s+[\'"][^\'"]+[\'"]\s+para\s+([^,(.\n]+)\s+\((?:org)',
+        normalized_prompt,
+    )
+    if spanish_match:
+        return _clean_name(spanish_match.group(1))
     return _extract_project_customer_name(prompt)
 
 
@@ -697,7 +715,7 @@ def _extract_percentage(prompt: str) -> Optional[float]:
 
 
 def _extract_hours(prompt: str) -> Optional[float]:
-    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:timar|timer|stunden|hours|hrs|h)\b", prompt, re.IGNORECASE)
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:timar|timer|stunden|hours|hrs|h|horas)\b", prompt, re.IGNORECASE)
     if not match:
         return None
     return float(match.group(1).replace(",", "."))
@@ -886,6 +904,9 @@ def _score_intents(lowered: str) -> Dict[str, int]:
             "basert på dei registrerte timane",
             "basierend auf den erfassten stunden",
             "fature o cliente",
+            "gere uma fatura de projeto",
+            "gerar uma fatura de projeto",
+            "genere una factura de proyecto",
         ]
     ):
         add("project_billing", 8)
@@ -911,6 +932,9 @@ def _score_intents(lowered: str) -> Dict[str, int]:
             "basert pÃ¥ dei registrerte timane",
             "basierend auf den erfassten stunden",
             "fature o cliente",
+            "gere uma fatura de projeto",
+            "gerar uma fatura de projeto",
+            "genere una factura de proyecto",
         ]
     )
     strict_project_billing_rate_signal = any(token in lowered for token in ["timesats", "hourly rate", "stundensatz"])
@@ -1015,6 +1039,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if supplier_detected:
         entity = "customer"
         action = "create"
+    if any(token in lowered for token in ["avdeling", "department", "departamento", "abteilung", "departement"]):
+        entity = "department"
     if "tilsett" in lowered or "tilsatt" in lowered:
         entity = "employee"
     if (
@@ -1032,6 +1058,14 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         entity = "ledger_posting"
     if "kontoplan" in lowered or "ledger account" in lowered or "chart of accounts" in lowered:
         entity = "ledger_account"
+    if not supplier_detected and payment_reversal_detected and invoice_context_detected:
+        return ParsedTask(
+            task_type=TaskType.UNSUPPORTED,
+            confidence=0.95,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+            notes=["Payment reversal is not supported safely with the current Tripletex contract."],
+        )
     if not supplier_detected and (payment_detected or payment_reversal_detected) and invoice_context_detected:
         entity = "invoice"
         action = "create"
@@ -1095,6 +1129,15 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         ]
     ):
         project_billing_detected = True
+    if entity == "project" and any(
+        token in lowered
+        for token in [
+            "gere uma fatura de projeto",
+            "gerar uma fatura de projeto",
+            "genere una factura de proyecto",
+        ]
+    ):
+        project_billing_detected = True
     if project_billing_detected:
         project_context = any(
             token in lowered for token in ["project", "prosjekt", "projeto", "proyecto", "projekt", "projet"]
@@ -1114,6 +1157,15 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 "basierend auf den erfassten stunden",
             ]
         )
+        if any(
+            token in lowered
+            for token in [
+                "gere uma fatura de projeto",
+                "gerar uma fatura de projeto",
+                "genere una factura de proyecto",
+            ]
+        ):
+            billing_phrase = True
         rate_signal = any(token in lowered for token in ["timesats", "hourly rate", "stundensatz"])
         hours_signal = any(
             re.search(pattern, lowered)
@@ -1292,6 +1344,10 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         fixed_price_amount = _extract_amount(prompt)
         billing_percentage = _extract_percentage(prompt)
         hours = _extract_hours(prompt)
+        if hours is None:
+            hours_match = re.search(r"(\d+(?:[.,]\d+)?)\s*horas\b", prompt, re.IGNORECASE)
+            if hours_match:
+                hours = float(hours_match.group(1).replace(",", "."))
         currency_amounts = _extract_currency_amounts(prompt)
         if fixed_price_amount is not None:
             fields["fixedPriceAmountCurrency"] = fixed_price_amount
@@ -1336,6 +1392,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             rate_amount = currency_amounts[-1]
             fields["hourlyRateCurrency"] = rate_amount
             fields["amount"] = round(hours * rate_amount, 2)
+        if fields.get("hourlyRateCurrency") is None:
+            rate_match = re.search(r"(?:taxa horaria|taxa horária)[^\d\n]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\s*/?\s*h\b", prompt, re.IGNORECASE)
+            if rate_match:
+                fields["hourlyRateCurrency"] = float(rate_match.group(1).replace(",", "."))
+                if hours is not None and fields.get("amount") is None:
+                    fields["amount"] = round(hours * float(fields["hourlyRateCurrency"]), 2)
         if fields.get("amount") is not None:
             billing_description = activity_name or (
                 "Partial billing {0}% of fixed price".format(int(billing_percentage or 100))
@@ -1665,6 +1727,18 @@ def parse_prompt(prompt: str) -> ParsedTask:
         TaskType.LIST_LEDGER_ACCOUNTS,
         TaskType.LIST_LEDGER_POSTINGS,
     } and rule_based.confidence >= 0.84:
+        return rule_based
+    if rule_based.task_type == TaskType.CREATE_DEPARTMENT and (
+        rule_based.fields.get("departmentNames") or rule_based.fields.get("name")
+    ):
+        return rule_based
+    if rule_based.task_type == TaskType.CREATE_INVOICE and (
+        rule_based.fields.get("markAsPaid") or any(key.startswith("order_line_") for key in rule_based.related_entities)
+    ):
+        return rule_based
+    if rule_based.task_type == TaskType.CREATE_PROJECT_BILLING and rule_based.confidence >= 0.78:
+        return rule_based
+    if rule_based.task_type == TaskType.CREATE_PAYROLL_VOUCHER and rule_based.confidence >= 0.7:
         return rule_based
 
     llm_parsed = parse_prompt_with_llm(prompt)

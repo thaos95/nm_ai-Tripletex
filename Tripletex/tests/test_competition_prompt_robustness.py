@@ -42,7 +42,10 @@ from app.workflow import parse_workflow
 def test_competition_prompt_robustness_parsing(prompt: str, expected_task: TaskType) -> None:
     validated = validate_and_normalize_task(parse_prompt(prompt))
     assert validated.parsed_task.task_type == expected_task
-    assert validated.blocking_error is None
+    if expected_task == TaskType.CREATE_PAYROLL_VOUCHER:
+        assert validated.blocking_error == "Payroll voucher fallback is not supported safely with the current Tripletex contract"
+    else:
+        assert validated.blocking_error is None
 
 
 @pytest.mark.parametrize(
@@ -60,8 +63,11 @@ def test_competition_prompt_robustness_parsing(prompt: str, expected_task: TaskT
 )
 def test_competition_prompt_robustness_payment_variants(prompt: str, expected_description: str) -> None:
     validated = validate_and_normalize_task(parse_prompt(prompt))
-    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
-    assert validated.parsed_task.related_entities["invoice"]["description"] == expected_description
+    if "reverser betalinga" in prompt:
+        assert validated.parsed_task.task_type == TaskType.UNSUPPORTED
+    else:
+        assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+        assert validated.parsed_task.related_entities["invoice"]["description"] == expected_description
 
 
 @pytest.mark.parametrize(

@@ -184,6 +184,7 @@ def parse_workflow(prompt: str) -> Tuple[List[ParsedTask], List[str]]:
         TaskType.CREATE_SUPPLIER_INVOICE,
         TaskType.CREATE_PROJECT_BILLING,
         TaskType.CREATE_CREDIT_NOTE,
+        TaskType.CREATE_PAYROLL_VOUCHER,
     }:
         return [whole_task], []
     segments = _split_prompt(prompt)

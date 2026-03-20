@@ -158,7 +158,7 @@ def recording_transport(recorded: dict) -> httpx.MockTransport:
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
-            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            recorded["invoice_payment_payload"] = dict(request.url.params)
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "POST" and request.url.path == "/v2/department":
@@ -779,9 +779,9 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payment_payload"]["paidAmount"] == 32200.0
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 32200.0
-    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+    assert recorded["invoice_payment_payload"]["paidAmount"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
 
@@ -802,9 +802,9 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payment_payload"]["paidAmount"] == 30450.0
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 30450.0
-    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+    assert recorded["invoice_payment_payload"]["paidAmount"] == "30450.0"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "30450.0"
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
 
@@ -840,7 +840,7 @@ def test_solve_create_multiple_departments() -> None:
     assert response.status_code == 200
     assert [item["name"] for item in recorded["department_payloads"]] == ["Utvikling", "Innkjøp", "Økonomi"]
     app.dependency_overrides.clear()
-def test_solve_payment_reversal_prompt_creates_outstanding_invoice() -> None:
+def test_solve_payment_reversal_prompt_is_blocked_as_unsupported() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
     client = TestClient(app)
@@ -852,10 +852,10 @@ def test_solve_payment_reversal_prompt_creates_outstanding_invoice() -> None:
             "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
         },
     )
-    assert response.status_code == 200
-    assert recorded["order_payload"]["orderLines"][0]["description"] == "Nettverksteneste"
-    assert "markAsPaid" not in recorded["invoice_payload"]
-    assert "paymentDate" not in recorded["invoice_payload"]
+    assert response.status_code == 502
+    assert "unsupported task" in response.json()["detail"].lower()
+    assert "order_payload" not in recorded
+    assert "invoice_payload" not in recorded
     app.dependency_overrides.clear()
 
 
@@ -938,9 +938,9 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
     assert "markAsPaid" not in recorded["invoice_payload"]
-    assert recorded["invoice_payment_payload"]["paidAmount"] == 39550.0
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 39550.0
-    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+    assert recorded["invoice_payment_payload"]["paidAmount"] == "39550.0"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "39550.0"
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
 

@@ -44,7 +44,7 @@ def efficiency_transport(recorded: dict) -> httpx.MockTransport:
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
-            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            recorded["invoice_payment_payload"] = dict(request.url.params)
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "POST" and request.url.path == "/v2/project":
@@ -130,9 +130,9 @@ def test_payment_workflow_keeps_same_call_count_and_carries_payment_fields() -> 
     ]
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] is not None
-    assert recorded["invoice_payment_payload"]["paidAmount"] == 32200.0
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 32200.0
-    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+    assert recorded["invoice_payment_payload"]["paidAmount"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
 

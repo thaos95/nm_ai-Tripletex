@@ -231,15 +231,12 @@ def test_parse_multi_department_prompt() -> None:
     validated = validate_and_normalize_task(parsed)
     assert validated.parsed_task.task_type == TaskType.CREATE_DEPARTMENT
     assert validated.parsed_task.fields["departmentNames"] == "Utvikling||Innkjøp||Økonomi"
-def test_parse_payment_reversal_prompt_keeps_invoice_unpaid() -> None:
+def test_parse_payment_reversal_prompt_is_blocked_as_unsupported() -> None:
     parsed = parse_prompt(
         'Betalinga frÃ¥ Strandvik AS (org.nr 859256333) for fakturaen "Nettverksteneste" (41550 kr ekskl. MVA) vart returnert av banken. Reverser betalinga slik at fakturaen igjen viser utestÃ¥ande belÃ¸p.'
     )
-    validated = validate_and_normalize_task(parsed)
-    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
-    assert "markAsPaid" not in validated.parsed_task.fields
-    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "859256333"
-    assert validated.parsed_task.related_entities["order"]["description"] == "Nettverksteneste"
+    assert parsed.task_type == TaskType.UNSUPPORTED
+    assert any("payment reversal" in note.lower() for note in parsed.notes)
 
 
 def test_parse_multiline_order_invoice_prompt_collects_all_order_lines() -> None:
@@ -253,3 +250,21 @@ def test_parse_multiline_order_invoice_prompt_collects_all_order_lines() -> None
     assert validated.parsed_task.related_entities["order_line_2"]["description"] == "Schulung"
     assert validated.parsed_task.fields["amount"] == 39550.0
     assert validated.parsed_task.fields["amountPaidCurrency"] == 39550.0
+
+
+def test_parse_spanish_departments_prompt_stays_on_department_flow() -> None:
+    parsed = parse_prompt('Crea tres departamentos en Tripletex: "MarkedsfÃ¸ring", "Lager" y "Kundeservice".')
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_DEPARTMENT
+    assert validated.parsed_task.fields["departmentNames"] == "Markedsføring||Lager||Kundeservice"
+
+
+def test_parse_portuguese_hour_based_project_billing_prompt() -> None:
+    parsed = parse_prompt(
+        'Registe 17 horas para Carolina Pereira (carolina.pereira@example.org) na atividade "Testing" do projeto "Auditoria de seguranÃ§a" para Estrela Lda (org. nÂº 834219662). Taxa horÃ¡ria: 1400 NOK/h. Gere uma fatura de projeto ao cliente com base nas horas registadas.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_PROJECT_BILLING
+    assert validated.parsed_task.fields["name"] == "Auditoria de segurança"
+    assert validated.parsed_task.fields["amount"] == 23800.0
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "834219662"

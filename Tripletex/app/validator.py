@@ -380,6 +380,10 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             return ValidationResult(normalized, blocking_error="Payroll voucher requires salary amount")
         if "employee" not in normalized.related_entities and normalized.fields.get("email"):
             normalized.related_entities["employee"] = {"email": normalized.fields["email"]}
+        return ValidationResult(
+            normalized,
+            blocking_error="Payroll voucher fallback is not supported safely with the current Tripletex contract",
+        )
 
     if normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         warnings.append("Travel expense flow is still high risk and only lightly validated")

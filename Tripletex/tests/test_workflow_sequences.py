@@ -50,7 +50,7 @@ def sequence_transport(recorded: dict) -> httpx.MockTransport:
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
-            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            recorded["invoice_payment_payload"] = dict(request.url.params)
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         return httpx.Response(404, json={"error": {"message": "not found"}})
@@ -162,7 +162,7 @@ def test_solve_order_then_invoice_payment_reuses_existing_order() -> None:
     assert len(recorded["order_payloads"]) == 1
     assert recorded["invoice_payload"]["orders"] == [{"id": 5001}]
     assert "markAsPaid" not in recorded["invoice_payload"]
-    assert recorded["invoice_payment_payload"]["paidAmount"] == 1500
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 1500
-    assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+    assert recorded["invoice_payment_payload"]["paidAmount"] == "1500.0"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "1500.0"
+    assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()

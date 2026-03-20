@@ -44,7 +44,10 @@ def test_adversarial_prompt_matrix(prompt: str, expected_task_type: TaskType, ex
     validated = validate_and_normalize_task(parse_prompt(prompt))
 
     assert validated.parsed_task.task_type == expected_task_type
-    assert validated.blocking_error is None
+    if expected_task_type == TaskType.CREATE_PAYROLL_VOUCHER:
+        assert validated.blocking_error == "Payroll voucher fallback is not supported safely with the current Tripletex contract"
+    else:
+        assert validated.blocking_error is None
     assert validated.parsed_task.fields["amount"] == expected_amount
 
 

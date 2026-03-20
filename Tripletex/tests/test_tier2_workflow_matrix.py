@@ -72,7 +72,7 @@ def tier2_transport(recorded: dict) -> httpx.MockTransport:
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
-            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            recorded["invoice_payment_payload"] = dict(request.url.params)
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "POST" and request.url.path == "/v2/project":
@@ -135,7 +135,7 @@ def test_tier2_invoice_and_payment_workflow_matrix(
         assert recorded["invoice_payment_payload"]["paymentDate"] is not None
         assert recorded["invoice_payment_payload"]["paidAmount"] is not None
         assert recorded["invoice_payment_payload"]["amountPaidCurrency"] is not None
-        assert recorded["invoice_payment_payload"]["paymentTypeId"] == 6
+        assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     else:
         assert "markAsPaid" not in recorded["invoice_payload"]
         assert "paymentDate" not in recorded["invoice_payload"]

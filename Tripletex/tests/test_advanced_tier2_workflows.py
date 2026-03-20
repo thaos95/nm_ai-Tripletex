@@ -39,6 +39,7 @@ def advanced_transport(recorded: dict) -> httpx.MockTransport:
             return httpx.Response(200, json={"value": {"id": 6001}})
 
         if request.method == "GET" and request.url.path == "/v2/invoice":
+            recorded["credit_note_invoice_query"] = dict(request.url.params)
             return httpx.Response(
                 200,
                 json={
@@ -99,6 +100,8 @@ def test_credit_note_workflow_creates_credit_invoice_payload() -> None:
         "GET /v2/invoice",
         "PUT /v2/invoice/6001/:createCreditNote",
     ]
+    assert recorded["credit_note_invoice_query"]["invoiceDateFrom"] is not None
+    assert recorded["credit_note_invoice_query"]["invoiceDateTo"] is not None
     assert recorded["credit_note_response"]["id"] == 6101
     app.dependency_overrides.clear()
 
@@ -195,7 +198,7 @@ def test_dimension_voucher_workflow_creates_dimension_values_and_voucher() -> No
     app.dependency_overrides.clear()
 
 
-def test_payroll_voucher_workflow_uses_manual_voucher_fallback() -> None:
+def test_payroll_voucher_workflow_is_blocked_before_manual_voucher_fallback() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: advanced_transport(recorded)
     client = TestClient(app)
@@ -209,13 +212,7 @@ def test_payroll_voucher_workflow_uses_manual_voucher_fallback() -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert recorded["calls"] == [
-        "GET /v2/employee",
-        "POST /v2/ledger/voucher",
-    ]
-    voucher_payload = recorded["voucher_payloads"][0]
-    assert voucher_payload["postings"][0]["account"]["number"] == "5000"
-    assert voucher_payload["postings"][0]["account"]["name"] == voucher_payload["description"]
-    assert voucher_payload["postings"][0]["amount"] == 50400.0
+    assert response.status_code == 502
+    assert "payroll voucher fallback is not supported safely" in response.json()["detail"].lower()
+    assert recorded.get("calls", []) == []
     app.dependency_overrides.clear()
