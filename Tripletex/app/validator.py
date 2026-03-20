@@ -91,6 +91,32 @@ def _normalize_customer_address_fields(task: ParsedTask) -> None:
     customer_address.update(address_fields)
 
 
+def _normalize_related_entity_aliases(task: ParsedTask) -> None:
+    for alias in ("projectManager", "projectLeader"):
+        if alias in task.related_entities:
+            canonical = task.related_entities.setdefault("project_manager", {})
+            canonical.update(task.related_entities.pop(alias))
+
+    if "employee" in task.related_entities and "project_manager" not in task.related_entities:
+        task.related_entities["project_manager"] = dict(task.related_entities["employee"])
+
+    for key, value in list(task.related_entities.items()):
+        if not isinstance(value, dict):
+            continue
+
+        if "orgNumber" in value and "organizationNumber" not in value:
+            value["organizationNumber"] = value.pop("orgNumber")
+
+        if "firstName" in value and "first_name" not in value:
+            value["first_name"] = value.pop("firstName")
+        if "lastName" in value and "last_name" not in value:
+            value["last_name"] = value.pop("lastName")
+
+        if key == "customer_address":
+            if "address" in value and "addressStreet" not in value:
+                value["addressStreet"] = value.pop("address")
+
+
 def _drop_unknown_fields(task: ParsedTask, allowed_fields: Dict[TaskType, Set[str]]) -> List[str]:
     warnings: List[str] = []
     allowed = allowed_fields.get(task.task_type)
@@ -117,6 +143,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         _normalize_customer_address_fields(normalized)
     elif normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         _normalize_travel_expense(normalized)
+
+    _normalize_related_entity_aliases(normalized)
 
     allowed_fields: Dict[TaskType, Set[str]] = {
         TaskType.CREATE_EMPLOYEE: {"first_name", "last_name", "email", "employee_type", "birthDate", "startDate"},
