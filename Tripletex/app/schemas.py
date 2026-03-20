@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
-Scalar = Union[str, int, float, bool]
+Scalar = Union[bool, int, float, str]
 
 
 class TaskType(str, Enum):

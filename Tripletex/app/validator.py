@@ -154,6 +154,8 @@ def _has_order_line_source(task: ParsedTask) -> bool:
         if key.startswith("order_line_") and isinstance(value, dict)
     ]
     return bool(
+        order.get("id")
+        or
         product.get("id")
         or product.get("name")
         or product.get("description")

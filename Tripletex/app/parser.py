@@ -17,8 +17,13 @@ QUOTED_RE = re.compile(r"['\"]([^'\"]+)['\"]")
 
 CREATE_WORDS = [
     "opprett",
+    "opprette",
     "registrer",
     "lag",
+    "lage",
+    "legg til",
+    "sett opp",
+    "opprett gjerne",
     "create",
     "crea",
     "crear",
@@ -36,10 +41,12 @@ CREATE_WORDS = [
     "registrieren",
     "anlegen",
     "legen sie",
+    "add",
+    "ajouter",
 ]
-UPDATE_WORDS = ["oppdater", "endre", "set", "update", "actualizar", "aktualisieren", "mettre"]
-DELETE_WORDS = ["slett", "fjern", "delete", "remove", "borrar", "excluir", "loschen", "supprimer"]
-READ_WORDS = ["hent", "list", "liste", "finn", "find", "show", "vis", "search", "sok", "søk", "buscar", "chercher"]
+UPDATE_WORDS = ["oppdater", "endre", "set", "update", "actualizar", "aktualisieren", "mettre", "edit", "change"]
+DELETE_WORDS = ["slett", "fjern", "delete", "remove", "borrar", "excluir", "loschen", "supprimer", "ta bort"]
+READ_WORDS = ["hent", "list", "liste", "finn", "find", "show", "vis", "search", "sok", "søk", "buscar", "chercher", "vis meg"]
 
 ENTITY_KEYWORDS = {
     "employee": ["ansatt", "employee", "empleado", "funcionario", "mitarbeiter", "employe", "tilsett", "tilsatt"],
@@ -53,6 +60,31 @@ ENTITY_KEYWORDS = {
     "voucher": ["bilag", "voucher", "comprobante", "buchung"],
     "ledger_account": ["kontoplan", "ledger account", "chart of accounts", "konti"],
     "ledger_posting": ["hovedboksposteringer", "ledger posting", "postering", "postings", "hovedbok"],
+}
+
+SEMANTIC_REPLACEMENTS = {
+    "kan du ": "",
+    "kunne du ": "",
+    "vil du ": "",
+    "please ": "",
+    "kindly ": "",
+    "vennligst ": "",
+    "gjerne ": "",
+    "om mulig ": "",
+    "i tripletex": " ",
+    "in tripletex": " ",
+    "legg til": "opprett",
+    "sett opp": "opprett",
+    "ta bort": "slett",
+    "vis meg": "vis",
+    "i tillegg": "deretter",
+    "og sa": "deretter",
+    "og så": "deretter",
+    "samt": "deretter",
+    "as well as": "and then",
+    "afterwards": "after that",
+    "e depois": "em seguida",
+    "und dann": "deretter",
 }
 
 ROLE_MAP = {
@@ -185,7 +217,12 @@ def _contains_payment_reversal_intent(text: str) -> bool:
 def _normalized_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
-    return ascii_text.lower()
+    lowered = ascii_text.lower()
+    lowered = re.sub(r"[^\w@.+\-]+", " ", lowered)
+    for source, target in SEMANTIC_REPLACEMENTS.items():
+        lowered = lowered.replace(source, target)
+    lowered = re.sub(r"\s+", " ", lowered)
+    return lowered.strip()
 
 
 def _repair_mojibake(text: str) -> str:
@@ -1510,6 +1547,8 @@ def parse_prompt(prompt: str) -> ParsedTask:
         TaskType.CREATE_PAYROLL_VOUCHER,
     }
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
+        if rule_based.task_type != TaskType.UNSUPPORTED and rule_based.confidence >= 0.78 and llm_parsed.task_type != rule_based.task_type:
+            return rule_based
         if (
             rule_based.task_type in specialized_rule_tasks
             and llm_parsed.task_type != rule_based.task_type

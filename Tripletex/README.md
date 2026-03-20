@@ -76,6 +76,19 @@ Test etter deploy:
 curl https://YOUR_CLOUD_RUN_URL/health
 ```
 
+Lokal prompt-lab i nettleser:
+
+```text
+http://127.0.0.1:8000/lab
+```
+
+Der kan du:
+
+- lime inn naturlige prompts
+- kjore `inspect` uten credentials
+- kjore `solve` med `base_url` og `session_token`
+- se parsed task, warnings og plan som tabell/JSON
+
 Submit denne URL-en til konkurransen:
 
 ```text

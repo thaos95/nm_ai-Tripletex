@@ -35,3 +35,23 @@ def test_parse_prompt_prefers_more_complete_rule_based_result_when_llm_is_weaker
     assert parsed.task_type == TaskType.CREATE_PROJECT
     assert parsed.related_entities["customer"]["organizationNumber"] == "827937223"
     assert parsed.related_entities["project_manager"]["email"] == "goncalo.oliveira@example.org"
+
+
+def test_parse_prompt_prefers_high_confidence_rule_based_task_when_llm_disagrees(monkeypatch) -> None:
+    prompt = 'Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) på 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.'
+
+    def fake_llm_parse(_prompt):
+        return ParsedTask(
+            task_type=TaskType.CREATE_ORDER,
+            confidence=0.92,
+            language_hint="nb",
+            fields={"orderDate": "2026-03-20"},
+            related_entities={"customer": {"name": "Brattli AS"}},
+        )
+
+    monkeypatch.setattr(parser_module, "parse_prompt_with_llm", fake_llm_parse)
+
+    parsed = parse_prompt(prompt)
+
+    assert parsed.task_type == TaskType.CREATE_INVOICE
+    assert parsed.related_entities["invoice"]["description"] == "Skylagring"

@@ -2,6 +2,7 @@ from datetime import date
 from typing import Any, Dict, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
+from app.error_handling import TripletexErrorCategory, classify_tripletex_error
 from app.schemas import ExecutionPlan, ExecutionResult, OperationResult, TaskType
 
 
@@ -102,16 +103,12 @@ def _build_minimal_invoice_payload(
 
 
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
-    message = str(exc).lower()
-    if "bankkontonummer" in message:
-        return False
-    if "bank account" in message:
-        return False
     if fields.get("markAsPaid"):
         return False
     if fields.get("creditNote"):
         return False
-    return " 422 " in message or "error 422" in message
+    classified = classify_tripletex_error(str(exc))
+    return classified.category == TripletexErrorCategory.VALIDATION_GENERIC
 
 
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,6 +153,11 @@ def _resolve_customer(
     operations: list,
     allow_create: bool = True,
 ) -> Optional[int]:
+    if spec.get("id") is not None:
+        customer_id = int(spec["id"])
+        operations.append(OperationResult(name="reuse-customer", resource_id=customer_id, payload={"id": customer_id}))
+        return customer_id
+
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
@@ -187,6 +189,11 @@ def _resolve_employee(
     operations: list,
     allow_create: bool = True,
 ) -> Optional[int]:
+    if spec.get("id") is not None:
+        employee_id = int(spec["id"])
+        operations.append(OperationResult(name="reuse-employee", resource_id=employee_id, payload={"id": employee_id}))
+        return employee_id
+
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
@@ -229,6 +236,11 @@ def _resolve_project_manager(client: TripletexClient, spec: Dict[str, Any], oper
     if not spec:
         return None
 
+    if spec.get("id") is not None:
+        employee_id = int(spec["id"])
+        operations.append(OperationResult(name="reuse-project-manager", resource_id=employee_id, payload={"id": employee_id}))
+        return employee_id
+
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
@@ -261,6 +273,11 @@ def _resolve_product(
     operations: list,
     allow_create: bool = True,
 ) -> Optional[int]:
+    if spec.get("id") is not None:
+        product_id = int(spec["id"])
+        operations.append(OperationResult(name="reuse-product", resource_id=product_id, payload={"id": product_id}))
+        return product_id
+
     match_fields = {}
     if spec.get("name"):
         match_fields["name"] = spec["name"]
@@ -501,11 +518,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if customer_id is None:
             raise TripletexClientError("Order requires resolvable customer")
-        product_id = (
-            _resolve_product(client, product_spec, operations, allow_create=False)
-            if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
-            else None
-        )
+        if not order_line_specs and product_spec.get("id") is not None:
+            product_id = _resolve_product(client, product_spec, operations, allow_create=False)
+        else:
+            product_id = (
+                _resolve_product(client, product_spec, operations, allow_create=False)
+                if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
+                else None
+            )
         order_id = _create_order(
             client,
             customer_id,
@@ -537,20 +557,28 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if customer_id is None:
             raise TripletexClientError("Invoice requires resolvable customer")
-        product_id = (
-            _resolve_product(client, product_spec, operations, allow_create=False)
-            if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
-            else None
-        )
-        order_id = _create_order(
-            client,
-            customer_id,
-            product_id,
-            fields,
-            product_spec,
-            operations,
-            order_line_specs=order_line_specs,
-        )
+        if not order_line_specs and product_spec.get("id") is not None:
+            product_id = _resolve_product(client, product_spec, operations, allow_create=False)
+        else:
+            product_id = (
+                _resolve_product(client, product_spec, operations, allow_create=False)
+                if (not order_line_specs and _should_resolve_product_for_order_line(product_spec))
+                else None
+            )
+        existing_order_id = order_spec.get("id")
+        if existing_order_id is not None:
+            order_id = int(existing_order_id)
+            operations.append(OperationResult(name="reuse-order", resource_id=order_id, payload={"id": order_id}))
+        else:
+            order_id = _create_order(
+                client,
+                customer_id,
+                product_id,
+                fields,
+                product_spec,
+                operations,
+                order_line_specs=order_line_specs,
+            )
         _create_invoice_with_fallback(
             client,
             fields,

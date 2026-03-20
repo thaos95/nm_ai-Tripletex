@@ -40,6 +40,9 @@ TASK_SCHEMA = {
 SYSTEM_PROMPT = """You classify Tripletex accounting tasks into a fixed schema.
 Return only structured JSON.
 Prefer the closest supported task type over unsupported when the intent is reasonably clear.
+Do not invent fields, entities, IDs, or prerequisites that are not grounded in the prompt.
+Prefer conservative extraction over speculative extraction.
+When a prompt implies a prerequisite-aware workflow, choose the final supported task and include enough related_entities for the deterministic executor to create prerequisites.
 Use these task types exactly:
 - create_employee
 - update_employee
@@ -81,6 +84,19 @@ Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-e
 - fields_json = "{\"name\":\"Acme AS\",\"isCustomer\":true}"
 - match_fields_json = "{}"
 - related_entities_json = "{\"customer\":{\"name\":\"Acme AS\",\"isCustomer\":true}}"
+
+Examples:
+User: Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) på 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.
+Assistant: {"task_type":"create_invoice","confidence":0.95,"language_hint":"nb","fields_json":"{\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"amount\":26450.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Brattli AS\",\"organizationNumber\":\"845762686\",\"isCustomer\":true},\"invoice\":{\"description\":\"Skylagring\",\"amountExcludingVatCurrency\":26450.0},\"order\":{\"description\":\"Skylagring\"}}","attachments_required":false,"notes":[]}
+
+User: The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.
+Assistant: {"task_type":"create_invoice","confidence":0.94,"language_hint":"en","fields_json":"{\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"amount\":32200.0,\"markAsPaid\":true,\"paymentDate\":\"2026-03-20\",\"amountPaidCurrency\":32200.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Windmill Ltd\",\"organizationNumber\":\"830362894\",\"isCustomer\":true},\"invoice\":{\"description\":\"System Development\",\"amountExcludingVatCurrency\":32200.0},\"order\":{\"description\":\"System Development\"}}","attachments_required":false,"notes":[]}
+
+User: Crie o projeto "Implementacao Rio" vinculado ao cliente Rio Azul Lda (org. no 827937223). O gerente de projeto e Goncalo Oliveira (goncalo.oliveira@example.org).
+Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt","fields_json":"{\"name\":\"Implementacao Rio\",\"startDate\":\"2026-03-20\"}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Rio Azul Lda\",\"organizationNumber\":\"827937223\",\"isCustomer\":true},\"project_manager\":{\"first_name\":\"Goncalo\",\"last_name\":\"Oliveira\",\"email\":\"goncalo.oliveira@example.org\"}}","attachments_required":false,"notes":[]}
+
+User: Sett fastpris 203000 kr på prosjektet "Digital transformasjon" for Stormberg AS (org.nr 834028719). Prosjektleder er Hilde Hansen (hilde.hansen@example.org). Fakturer kunden for 75 % av fastprisen som en delbetaling.
+Assistant: {"task_type":"create_project_billing","confidence":0.93,"language_hint":"nb","fields_json":"{\"name\":\"Digital transformasjon\",\"startDate\":\"2026-03-20\",\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"fixedPriceAmountCurrency\":203000.0,\"billingPercentage\":75.0,\"amount\":152250.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Stormberg AS\",\"organizationNumber\":\"834028719\",\"isCustomer\":true},\"project_manager\":{\"first_name\":\"Hilde\",\"last_name\":\"Hansen\",\"email\":\"hilde.hansen@example.org\"},\"invoice\":{\"description\":\"Partial billing 75% of fixed price\",\"amountExcludingVatCurrency\":152250.0},\"order\":{\"description\":\"Partial billing 75% of fixed price\"}}","attachments_required":false,"notes":[]}
 """
 
 

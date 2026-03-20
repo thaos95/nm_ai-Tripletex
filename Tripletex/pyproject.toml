@@ -6,9 +6,9 @@ requires-python = ">=3.8"
 dependencies = [
     "fastapi>=0.115,<1.0",
     "httpx>=0.28,<0.29",
-    "pydantic>=2.9,<3.0",
-    "pydantic-settings>=2.6,<3.0",
-    "uvicorn>=0.34,<0.35",
+    "pydantic>=2.8,<2.9",
+    "pydantic-settings>=2.5,<2.6",
+    "uvicorn>=0.33,<0.34",
 ]
 
 [project.optional-dependencies]
