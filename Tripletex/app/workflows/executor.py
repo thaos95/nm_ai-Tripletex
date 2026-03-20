@@ -31,6 +31,10 @@ def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) 
     return _compact_payload(payload)
 
 
+def _can_create_employee_prerequisite(spec: Dict[str, Any]) -> bool:
+    return bool(spec.get("email") and spec.get("first_name"))
+
+
 def _build_customer_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     payload = {
         "name": spec.get("name"),
@@ -43,11 +47,19 @@ def _build_customer_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     return _compact_payload(payload)
 
 
+def _can_create_customer_prerequisite(spec: Dict[str, Any]) -> bool:
+    return bool(spec.get("name") and (spec.get("organizationNumber") or spec.get("email")))
+
+
 def _build_product_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     payload = {"name": spec.get("name")}
     if spec.get("priceExcludingVatCurrency") is not None:
         payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
     return _compact_payload(payload)
+
+
+def _can_create_product_prerequisite(spec: Dict[str, Any]) -> bool:
+    return bool(spec.get("name") and spec.get("priceExcludingVatCurrency") is not None)
 
 
 def _build_project_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -71,7 +83,12 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
     return _compact_payload(payload)
 
 
-def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
+def _resolve_customer(
+    client: TripletexClient,
+    spec: Dict[str, Any],
+    operations: list,
+    allow_create: bool = True,
+) -> Optional[int]:
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
@@ -86,6 +103,9 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
         operations.append(OperationResult(name="resolve-customer", resource_id=customer_id, payload=existing))
         return customer_id
 
+    if not allow_create:
+        return None
+
     payload = {"name": spec.get("name", "Unknown Customer"), "isCustomer": True}
     payload.update(_build_customer_payload(spec))
     response = client.create_resource("customer", payload)
@@ -94,7 +114,12 @@ def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations:
     return customer_id
 
 
-def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
+def _resolve_employee(
+    client: TripletexClient,
+    spec: Dict[str, Any],
+    operations: list,
+    allow_create: bool = True,
+) -> Optional[int]:
     match_fields = {}
     if spec.get("email"):
         match_fields["email"] = spec["email"]
@@ -109,6 +134,9 @@ def _resolve_employee(client: TripletexClient, spec: Dict[str, Any], operations:
         employee_id = existing["id"]
         operations.append(OperationResult(name="resolve-employee", resource_id=employee_id, payload=existing))
         return employee_id
+
+    if not allow_create:
+        return None
 
     department_id = _resolve_department(client, operations)
     payload = _build_employee_payload(spec, department_id)
@@ -160,7 +188,12 @@ def _resolve_project_manager(client: TripletexClient, spec: Dict[str, Any], oper
     return _resolve_fallback_project_manager(client, operations)
 
 
-def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
+def _resolve_product(
+    client: TripletexClient,
+    spec: Dict[str, Any],
+    operations: list,
+    allow_create: bool = True,
+) -> Optional[int]:
     match_fields = {}
     if spec.get("name"):
         match_fields["name"] = spec["name"]
@@ -171,7 +204,7 @@ def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: 
         operations.append(OperationResult(name="resolve-product", resource_id=product_id, payload=existing))
         return product_id
 
-    if not spec.get("name"):
+    if not allow_create or not spec.get("name"):
         return None
 
     response = client.create_resource("product", _build_product_payload(spec))
@@ -218,6 +251,10 @@ def _create_order(
     order_id = _extract_id(response)
     operations.append(OperationResult(name="create-order", resource_id=order_id, payload=response))
     return order_id
+
+
+def _should_resolve_product_for_order_line(product_spec: Dict[str, Any]) -> bool:
+    return not bool(product_spec.get("description"))
 
 
 def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResult:
@@ -282,7 +319,12 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         payload = _build_project_payload(fields)
         customer_spec = related.get("customer")
         if customer_spec:
-            customer_id = _resolve_customer(client, customer_spec, operations)
+            customer_id = _resolve_customer(
+                client,
+                customer_spec,
+                operations,
+                allow_create=_can_create_customer_prerequisite(customer_spec),
+            )
             if customer_id is not None:
                 payload["customer"] = {"id": customer_id}
         manager_spec = (
@@ -329,10 +371,21 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         order_spec = dict(related.get("order", {}))
         if order_spec.get("description") and "description" not in product_spec:
             product_spec["description"] = order_spec["description"]
-        customer_id = _resolve_customer(client, customer_spec, operations)
+        if product_spec.get("name") and "description" not in product_spec:
+            product_spec["description"] = product_spec["name"]
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=_can_create_customer_prerequisite(customer_spec),
+        )
         if customer_id is None:
             raise TripletexClientError("Order requires resolvable customer")
-        product_id = _resolve_product(client, product_spec, operations)
+        product_id = (
+            _resolve_product(client, product_spec, operations, allow_create=False)
+            if _should_resolve_product_for_order_line(product_spec)
+            else None
+        )
         order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
         operations.append(OperationResult(name="order-ready", resource_id=order_id))
 
@@ -345,10 +398,21 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             product_spec["description"] = invoice_spec["description"]
         if order_spec.get("description") and "description" not in product_spec:
             product_spec["description"] = order_spec["description"]
-        customer_id = _resolve_customer(client, customer_spec, operations)
+        if product_spec.get("name") and "description" not in product_spec:
+            product_spec["description"] = product_spec["name"]
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=_can_create_customer_prerequisite(customer_spec),
+        )
         if customer_id is None:
             raise TripletexClientError("Invoice requires resolvable customer")
-        product_id = _resolve_product(client, product_spec, operations)
+        product_id = (
+            _resolve_product(client, product_spec, operations, allow_create=False)
+            if _should_resolve_product_for_order_line(product_spec)
+            else None
+        )
         order_id = _create_order(client, customer_id, product_id, fields, product_spec, operations)
         # Tripletex sandbox may reject invoice creation until company bank settings exist.
         # Keep the flow narrow and deterministic; rely on logged 422 details if this task appears.

@@ -35,3 +35,27 @@ def test_validator_normalizes_customer_address_aliases_inside_related_entities()
 
     assert validated.parsed_task.related_entities["customer_address"]["addressStreet"] == "Solveien 74"
     assert "address" not in validated.parsed_task.related_entities["customer_address"]
+
+
+def test_validator_normalizes_nested_org_email_and_phone_fields() -> None:
+    task = ParsedTask(
+        task_type=TaskType.CREATE_PROJECT,
+        confidence=0.8,
+        language_hint="pt",
+        fields={"name": "Implementacao Rio"},
+        related_entities={
+            "customer": {"name": "Rio Azul Lda", "organizationNumber": "827 937 223", "isCustomer": True},
+            "projectManager": {
+                "firstName": "Goncalo",
+                "lastName": "Oliveira",
+                "email": "GONCALO.OLIVEIRA@EXAMPLE.ORG ",
+                "phoneNumberMobile": "+47 48 00 12 34",
+            },
+        },
+    )
+
+    validated = validate_and_normalize_task(task)
+
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "827937223"
+    assert validated.parsed_task.related_entities["project_manager"]["email"] == "goncalo.oliveira@example.org"
+    assert validated.parsed_task.related_entities["project_manager"]["phoneNumberMobile"] == "+4748001234"

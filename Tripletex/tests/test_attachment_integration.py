@@ -55,6 +55,8 @@ def test_solve_passes_attachment_metadata_and_text_into_parser(monkeypatch) -> N
     assert response.json() == SolveResponse().model_dump()
     assert "Attachment metadata:" in captured["parsing_input"]
     assert "filename=invoice.txt, mime_type=text/plain" in captured["parsing_input"]
+    assert "Attachment hints:" in captured["parsing_input"]
+    assert "amounts=450" in captured["parsing_input"]
     assert "Attachment text:" in captured["parsing_input"]
     assert "Beløp 450" in captured["parsing_input"]
     assert captured["parsed_task_type"] == TaskType.DELETE_TRAVEL_EXPENSE

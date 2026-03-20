@@ -1,9 +1,13 @@
 from app.workflows.executor import (
+    _can_create_customer_prerequisite,
+    _can_create_employee_prerequisite,
+    _can_create_product_prerequisite,
     _build_customer_payload,
     _build_employee_payload,
     _build_invoice_payload,
     _build_product_payload,
     _build_project_payload,
+    _should_resolve_product_for_order_line,
 )
 
 
@@ -81,3 +85,25 @@ def test_customer_contract_omits_address_like_fields() -> None:
     assert "address" not in payload
     assert "postalCode" not in payload
     assert "city" not in payload
+
+
+def test_product_prerequisite_creation_requires_price_signal() -> None:
+    assert _can_create_product_prerequisite({"name": "Consulting"}) is False
+    assert _can_create_product_prerequisite({"name": "Consulting", "priceExcludingVatCurrency": 1500}) is True
+
+
+def test_order_line_with_description_skips_product_resolution() -> None:
+    assert _should_resolve_product_for_order_line({"name": "Consulting", "description": "Consulting"}) is False
+    assert _should_resolve_product_for_order_line({"name": "Consulting"}) is True
+
+
+def test_customer_prerequisite_creation_requires_name_plus_strong_identifier() -> None:
+    assert _can_create_customer_prerequisite({"name": "Acme AS"}) is False
+    assert _can_create_customer_prerequisite({"name": "Acme AS", "organizationNumber": "123456789"}) is True
+    assert _can_create_customer_prerequisite({"name": "Acme AS", "email": "post@acme.no"}) is True
+
+
+def test_employee_prerequisite_creation_requires_email_and_first_name() -> None:
+    assert _can_create_employee_prerequisite({"first_name": "Ola"}) is False
+    assert _can_create_employee_prerequisite({"email": "ola@example.org"}) is False
+    assert _can_create_employee_prerequisite({"first_name": "Ola", "email": "ola@example.org"}) is True

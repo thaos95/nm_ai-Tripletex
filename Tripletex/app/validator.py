@@ -35,14 +35,14 @@ def _normalize_phone_fields(task: ParsedTask) -> None:
     ]
     for alias in aliases:
         if alias in task.fields:
-            task.fields["phoneNumberMobile"] = str(task.fields.pop(alias)).replace(" ", "")
+            task.fields["phoneNumberMobile"] = "".join(ch for ch in str(task.fields.pop(alias)) if ch.isdigit() or ch == "+")
             break
 
 
 def _normalize_customer_phone(task: ParsedTask) -> None:
     for alias in ("phone", "phoneNumberWork", "phoneNumberMobile"):
         if alias in task.fields:
-            task.fields["phoneNumber"] = str(task.fields.pop(alias)).replace(" ", "")
+            task.fields["phoneNumber"] = "".join(ch for ch in str(task.fields.pop(alias)) if ch.isdigit() or ch == "+")
             break
 
 
@@ -68,6 +68,8 @@ def _normalize_customer_fields(task: ParsedTask) -> None:
         task.fields["organizationNumber"] = digits_only
     else:
         task.fields.pop("organizationNumber", None)
+    if "email" in task.fields:
+        task.fields["email"] = str(task.fields["email"]).strip().lower()
 
 
 def _normalize_customer_address_fields(task: ParsedTask) -> None:
@@ -107,10 +109,22 @@ def _normalize_related_entity_aliases(task: ParsedTask) -> None:
         if "orgNumber" in value and "organizationNumber" not in value:
             value["organizationNumber"] = value.pop("orgNumber")
 
+        if "organizationNumber" in value:
+            digits_only = "".join(ch for ch in str(value["organizationNumber"]) if ch.isdigit())
+            if len(digits_only) == 9:
+                value["organizationNumber"] = digits_only
+
         if "firstName" in value and "first_name" not in value:
             value["first_name"] = value.pop("firstName")
         if "lastName" in value and "last_name" not in value:
             value["last_name"] = value.pop("lastName")
+
+        if "email" in value:
+            value["email"] = str(value["email"]).strip().lower()
+
+        for phone_key in ("phoneNumber", "phoneNumberMobile", "mobilePhoneNumber"):
+            if phone_key in value:
+                value[phone_key] = "".join(ch for ch in str(value[phone_key]) if ch.isdigit() or ch == "+")
 
         if key == "customer_address":
             if "address" in value and "addressStreet" not in value:
@@ -128,6 +142,19 @@ def _drop_unknown_fields(task: ParsedTask, allowed_fields: Dict[TaskType, Set[st
             task.fields.pop(key)
             warnings.append("Dropped unsupported field '{0}' for task {1}".format(key, task.task_type))
     return warnings
+
+
+def _has_order_line_source(task: ParsedTask) -> bool:
+    product = task.related_entities.get("product", {})
+    order = task.related_entities.get("order", {})
+    invoice = task.related_entities.get("invoice", {})
+    return bool(
+        product.get("id")
+        or product.get("name")
+        or product.get("description")
+        or order.get("description")
+        or invoice.get("description")
+    )
 
 
 def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
@@ -229,8 +256,18 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
     if normalized.task_type in {TaskType.CREATE_ORDER, TaskType.CREATE_INVOICE}:
         if "customer" not in normalized.related_entities:
             return ValidationResult(normalized, blocking_error="Order/invoice creation requires customer reference")
+        if not _has_order_line_source(normalized):
+            return ValidationResult(
+                normalized,
+                blocking_error="Order/invoice creation requires product reference or line description",
+            )
         if "product" not in normalized.related_entities:
             warnings.append("Order/invoice creation has no product reference; this is risky")
+
+    if normalized.task_type == TaskType.CREATE_INVOICE and normalized.fields.get("markAsPaid"):
+        normalized.fields.setdefault("paymentDate", normalized.fields.get("invoiceDate"))
+        if normalized.fields.get("amountPaidCurrency") is None and normalized.fields.get("amount") is not None:
+            normalized.fields["amountPaidCurrency"] = normalized.fields["amount"]
 
     if normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         warnings.append("Travel expense flow is still high risk and only lightly validated")

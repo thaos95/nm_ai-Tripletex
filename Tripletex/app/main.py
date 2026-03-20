@@ -3,7 +3,7 @@ from typing import Dict, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
-from app.attachments.service import decode_files, describe_attachments, extract_attachment_text
+from app.attachments.service import decode_files, describe_attachments, extract_attachment_text, summarize_attachment_hints
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.config import settings
 from app.logging_utils import get_logger
@@ -53,10 +53,13 @@ def solve(
 ) -> SolveResponse:
     decoded_files = decode_files(request.files)
     attachment_text = extract_attachment_text(decoded_files)
+    attachment_hints = summarize_attachment_hints(attachment_text)
     attachment_description = describe_attachments(decoded_files)
     parsing_input = request.prompt
     if attachment_description:
         parsing_input = "{0}\n\nAttachment metadata:\n{1}".format(parsing_input, attachment_description)
+    if attachment_hints:
+        parsing_input = "{0}\n\nAttachment hints:\n{1}".format(parsing_input, attachment_hints)
     if attachment_text:
         parsing_input = "{0}\n\nAttachment text:\n{1}".format(parsing_input, attachment_text)
 

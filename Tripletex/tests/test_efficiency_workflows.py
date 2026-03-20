@@ -13,6 +13,9 @@ def efficiency_transport(recorded: dict) -> httpx.MockTransport:
         if request.method == "GET" and request.url.path == "/v2/customer":
             return httpx.Response(200, json={"values": [{"id": 2001, "name": "Brattli AS"}]})
 
+        if request.method == "GET" and request.url.path == "/v2/product":
+            return httpx.Response(200, json={"values": []})
+
         if request.method == "GET" and request.url.path == "/v2/employee":
             email = request.url.params.get("email")
             if email == "goncalo.oliveira@example.org":
@@ -123,4 +126,52 @@ def test_payment_workflow_keeps_same_call_count_and_carries_payment_fields() -> 
     assert recorded["invoice_payload"]["markAsPaid"] is True
     assert recorded["invoice_payload"]["paymentDate"] is not None
     assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
+    app.dependency_overrides.clear()
+
+
+def test_invoice_with_product_name_only_uses_description_and_avoids_product_creation() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: efficiency_transport(recorded)
+    client = TestClient(app)
+
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Create invoice for customer "Brattli AS" with product "Consulting" 1500',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert recorded["calls"] == [
+        "GET /v2/customer",
+        "POST /v2/order",
+        "POST /v2/invoice",
+    ]
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Consulting"
+    assert "product" not in recorded["order_payload"]["orderLines"][0]
+    app.dependency_overrides.clear()
+
+
+def test_invoice_with_name_only_customer_does_not_create_customer_prerequisite() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: efficiency_transport(recorded)
+    client = TestClient(app)
+
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Create invoice for customer "Unknown Name" with product "Consulting" 1500',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert recorded["calls"] == [
+        "GET /v2/customer",
+    ]
+    assert "order_payload" not in recorded
+    assert "invoice_payload" not in recorded
     app.dependency_overrides.clear()

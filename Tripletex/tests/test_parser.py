@@ -1,5 +1,7 @@
 from datetime import date
 
+import app.parser as parser_module
+
 from app.parser import parse_prompt
 from app.schemas import TaskType
 from app.validator import validate_and_normalize_task

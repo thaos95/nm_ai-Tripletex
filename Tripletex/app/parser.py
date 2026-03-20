@@ -75,6 +75,44 @@ MONTH_MAP = {
     "december": 12,
 }
 
+SEND_INVOICE_TOKENS = [
+    "send",
+    "sende",
+    "senda",
+    "envoy",
+    "envoyer",
+    "envia",
+    "envía",
+    "senden",
+    "versenden",
+]
+
+PAYMENT_TOKENS = [
+    "register full payment",
+    "full payment",
+    "payment on this invoice",
+    "paid in full",
+    "settle this invoice",
+    "registe o pagamento",
+    "registar o pagamento",
+    "pagamento total",
+    "pagamento completo",
+    "pagamento",
+    "registre le paiement",
+    "paiement total",
+    "paiement complet",
+    "registrer full betaling",
+    "registrer betaling",
+    "betaling",
+    "registre el pago",
+    "pago completo",
+    "pago total",
+    "zahlung",
+    "vollstandige zahlung",
+    "vollstÃ¤ndige zahlung",
+    "bezahlen",
+]
+
 
 def _today_iso() -> str:
     return date.today().isoformat()
@@ -101,10 +139,33 @@ def _contains_any(text: str, options: List[str]) -> bool:
     return any(option in text for option in options)
 
 
+def _contains_send_invoice_intent(text: str) -> bool:
+    return _contains_any(text, SEND_INVOICE_TOKENS)
+
+
+def _contains_payment_intent(text: str) -> bool:
+    return _contains_any(text, PAYMENT_TOKENS)
+
+
 def _normalized_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
     return ascii_text.lower()
+
+
+def _repair_mojibake(text: str) -> str:
+    repaired = text
+    for _ in range(3):
+        if "Ã" not in repaired and "Â" not in repaired:
+            break
+        try:
+            candidate = repaired.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            break
+        if not candidate or candidate == repaired:
+            break
+        repaired = candidate
+    return repaired
 
 
 def _detect_action(lowered: str) -> Optional[str]:
@@ -230,6 +291,9 @@ def _extract_project_customer_name(prompt: str) -> Optional[str]:
     alt_match = re.search(r"(?:vinculado al cliente|vinculado ao cliente)\s+([A-Z][^,(.\n]+)", prompt, re.IGNORECASE)
     if alt_match:
         return _clean_name(alt_match.group(1))
+    french_match = re.search(r"(?:au client)\s+([^,(.\n][^,(.\n]+)", prompt, re.IGNORECASE)
+    if french_match:
+        return _clean_name(french_match.group(1))
     patterns = [
         r"(?:linked to the customer|for kunde|for kunden|knyttet til kunden|knyttet til kunde)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
         r"(?:customer|kunde|kunden|client|cliente)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
@@ -453,6 +517,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             "payment on this invoice",
         ]
     )
+    payment_detected = _contains_payment_intent(lowered)
     invoice_context_detected = any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"])
     if supplier_detected:
         entity = "customer"
@@ -463,7 +528,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         entity = "invoice"
         action = "create"
     if not supplier_detected and invoice_context_detected and (
-        any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "envoy", "send", "registrer"])
+        any(token in lowered for token in ["create", "creez", "creer", "opprett", "lag", "registrer"])
+        or _contains_send_invoice_intent(lowered)
         or payment_detected
     ):
         entity = "invoice"
@@ -741,9 +807,9 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if description:
             related_entities.setdefault("invoice", {})["description"] = description
             related_entities.setdefault("order", {})["description"] = description
-        if any(token in lowered for token in ["send", "envoy", "sendez"]):
+        if _contains_send_invoice_intent(lowered):
             fields["sendByEmail"] = True
-        if any(token in lowered for token in ["betaling", "pago", "pagamento", "zahlung", "payment"]):
+        if payment_detected:
             fields["markAsPaid"] = True
             fields["paymentDate"] = fields["invoiceDate"]
             if amount is not None:
@@ -766,6 +832,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
 
 def parse_prompt(prompt: str) -> ParsedTask:
+    prompt = _repair_mojibake(prompt)
     llm_parsed = parse_prompt_with_llm(prompt)
     rule_based = parse_prompt_rule_based(prompt)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
@@ -783,5 +850,19 @@ def parse_prompt(prompt: str) -> ParsedTask:
                     for nested_key, nested_value in value.items():
                         if nested_key not in llm_parsed.related_entities[key]:
                             llm_parsed.related_entities[key][nested_key] = nested_value
+            return llm_parsed
+
+        llm_detail_score = len(llm_parsed.fields) + len(llm_parsed.match_fields) + sum(
+            len(value) for value in llm_parsed.related_entities.values()
+        )
+        rule_detail_score = len(rule_based.fields) + len(rule_based.match_fields) + sum(
+            len(value) for value in rule_based.related_entities.values()
+        )
+        if (
+            rule_based.task_type != TaskType.UNSUPPORTED
+            and rule_detail_score > llm_detail_score
+            and rule_based.confidence >= llm_parsed.confidence - 0.1
+        ):
+            return rule_based
         return llm_parsed
     return rule_based

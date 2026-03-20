@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import re
+import unicodedata
 
 
 class TripletexClientError(RuntimeError):
@@ -65,7 +66,7 @@ class TripletexClient:
     def _match_value(self, candidate: Dict[str, Any], field: str) -> Optional[str]:
         value = candidate.get(field)
         if value is not None:
-            return self._normalize_string(value)
+            return self._normalize_field_value(field, value)
         nested_map = {
             "first_name": "firstName",
             "last_name": "lastName",
@@ -75,13 +76,29 @@ class TripletexClient:
         }
         nested = nested_map.get(field)
         if nested and candidate.get(nested) is not None:
-            return self._normalize_string(candidate.get(nested))
+            return self._normalize_field_value(field, candidate.get(nested))
         return None
 
+    def _normalize_field_value(self, field: str, value: Any) -> str:
+        if value is None:
+            return ""
+
+        text = str(value).strip()
+        if field in {"organizationNumber", "employeeNumber", "productNumber"}:
+            return "".join(ch for ch in text if ch.isdigit())
+        if field in {"phoneNumber", "phoneNumberMobile", "mobilePhoneNumber"}:
+            return "".join(ch for ch in text if ch.isdigit() or ch == "+")
+        if field == "email":
+            return text.lower()
+        return self._normalize_string(text)
+
     def _normalize_string(self, value: Any) -> str:
-        text = str(value).strip().lower()
+        text = unicodedata.normalize("NFKD", str(value))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = text.strip().lower()
+        text = re.sub(r"[^\w@.+\-]+", " ", text, flags=re.UNICODE)
         text = re.sub(r"\s+", " ", text)
-        return text
+        return text.strip()
 
     def _candidate_matches(self, candidate: Dict[str, Any], normalized_match: Dict[str, str]) -> bool:
         if all(self._match_value(candidate, key) == value for key, value in normalized_match.items()):
@@ -96,6 +113,55 @@ class TripletexClient:
             target_full_name = self._normalize_string("{0} {1}".format(first_name, last_name))
             return candidate_full_name == target_full_name
         return False
+
+    def _candidate_score(self, candidate: Dict[str, Any], normalized_match: Dict[str, str]) -> int:
+        score = 0
+        weights = {
+            "organizationNumber": 6,
+            "email": 6,
+            "employeeNumber": 6,
+            "productNumber": 6,
+            "first_name": 3,
+            "last_name": 3,
+            "name": 2,
+            "phoneNumber": 2,
+            "phoneNumberMobile": 2,
+            "mobilePhoneNumber": 2,
+        }
+
+        for key, value in normalized_match.items():
+            candidate_value = self._match_value(candidate, key)
+            if candidate_value is None:
+                continue
+            if candidate_value == value:
+                score += weights.get(key, 1)
+                continue
+            if key == "name":
+                if candidate_value.startswith(value) or value.startswith(candidate_value):
+                    score += 1
+            elif key in {"first_name", "last_name"}:
+                if candidate_value.startswith(value) or value.startswith(candidate_value):
+                    score += 1
+
+        first_name = normalized_match.get("first_name")
+        last_name = normalized_match.get("last_name")
+        if first_name and last_name:
+            candidate_full_name = self._normalize_string(
+                "{0} {1}".format(candidate.get("firstName", ""), candidate.get("lastName", "")).strip()
+            )
+            target_full_name = self._normalize_string("{0} {1}".format(first_name, last_name))
+            if candidate_full_name == target_full_name:
+                score += 4
+
+        return score
+
+    def _has_strong_identifier(self, normalized_match: Dict[str, str]) -> bool:
+        if any(
+            normalized_match.get(key)
+            for key in ("organizationNumber", "email", "employeeNumber", "productNumber", "phoneNumber", "phoneNumberMobile", "mobilePhoneNumber")
+        ):
+            return True
+        return bool(normalized_match.get("first_name") and normalized_match.get("last_name"))
 
     def find_single(self, resource: str, match_fields: Dict[str, Any], fields: str = "*") -> Optional[Dict[str, Any]]:
         if not match_fields:
@@ -112,7 +178,7 @@ class TripletexClient:
         if not values:
             return None
 
-        normalized_match = dict((key, self._normalize_string(value)) for key, value in match_fields.items())
+        normalized_match = dict((key, self._normalize_field_value(key, value)) for key, value in match_fields.items())
         exact_matches = []
         for candidate in values:
             if self._candidate_matches(candidate, normalized_match):
@@ -120,7 +186,17 @@ class TripletexClient:
 
         if len(exact_matches) == 1:
             return exact_matches[0]
-        if len(values) == 1:
+        if exact_matches:
+            return None
+        scored = sorted(
+            ((self._candidate_score(candidate, normalized_match), candidate) for candidate in values),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        if scored and scored[0][0] >= 2:
+            if len(scored) == 1 or scored[0][0] > scored[1][0]:
+                return scored[0][1]
+        if len(values) == 1 and self._has_strong_identifier(normalized_match):
             return values[0]
         return None
 
