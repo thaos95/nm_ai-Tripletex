@@ -42,11 +42,11 @@ def advanced_transport(recorded: dict) -> httpx.MockTransport:
             recorded.setdefault("project_payloads", []).append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(200, json={"value": {"id": 4001}})
 
-        if request.method == "POST" and request.url.path == "/v2/dimension":
+        if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionName":
             recorded["dimension_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 8001}})
 
-        if request.method == "POST" and request.url.path == "/v2/dimension/value":
+        if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionValue":
             recorded.setdefault("dimension_value_payloads", []).append(json.loads(request.content.decode("utf-8")))
             value_id = 8100 + len(recorded["dimension_value_payloads"])
             return httpx.Response(200, json={"value": {"id": value_id}})
@@ -162,9 +162,9 @@ def test_dimension_voucher_workflow_creates_dimension_values_and_voucher() -> No
 
     assert response.status_code == 200
     assert recorded["calls"] == [
-        "POST /v2/dimension",
-        "POST /v2/dimension/value",
-        "POST /v2/dimension/value",
+        "POST /v2/ledger/accountingDimensionName",
+        "POST /v2/ledger/accountingDimensionValue",
+        "POST /v2/ledger/accountingDimensionValue",
         "POST /v2/ledger/voucher",
     ]
     assert recorded["dimension_payload"]["name"] == "Marked"
