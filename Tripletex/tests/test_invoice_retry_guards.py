@@ -89,7 +89,6 @@ def test_create_invoice_retries_once_with_minimal_payload_on_generic_422() -> No
     assert response.status_code == 200
     assert recorded["calls"] == [
         "GET /v2/customer",
-        "GET /v2/ledger/account",
         "POST /v2/order",
         "POST /v2/invoice",
         "POST /v2/invoice",
@@ -117,10 +116,9 @@ def test_create_invoice_does_not_retry_on_bank_account_validation_error() -> Non
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 502
     assert recorded["calls"] == [
         "GET /v2/customer",
-        "GET /v2/ledger/account",
         "POST /v2/order",
         "POST /v2/invoice",
     ]

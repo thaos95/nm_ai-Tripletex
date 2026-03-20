@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from app.attachments.service import decode_files, describe_attachments, extract_attachment_text, summarize_attachment_hints
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.config import settings
-from app.error_handling import classify_tripletex_error
+from app.error_handling import TripletexErrorCategory, classify_tripletex_error
 from app.logging_utils import get_logger
 from app.parser import parse_prompt
 from app.planner import build_plan
@@ -156,10 +156,10 @@ def solve(
             validation.blocking_error,
             request.prompt[:500],
         )
-        return SolveResponse()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=validation.blocking_error)
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
-        return SolveResponse()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unsupported task")
 
     client = get_tripletex_client(request, transport)
     try:
@@ -173,7 +173,7 @@ def solve(
             parsed_task.task_type,
             request.prompt[:500],
         )
-        return SolveResponse()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     except TripletexClientError as exc:
         classified = classify_tripletex_error(str(exc))
         logger.exception(
@@ -183,7 +183,12 @@ def solve(
             classified.recoverable,
             request.prompt[:500],
         )
-        return SolveResponse()
+        if classified.category in {
+            TripletexErrorCategory.UNAUTHORIZED,
+            TripletexErrorCategory.WRONG_ENDPOINT,
+        }:
+            return SolveResponse()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=classified.summary)
     finally:
         client.close()
 

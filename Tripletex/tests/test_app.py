@@ -773,9 +773,9 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "System Development"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert "markAsPaid" not in recorded["invoice_payload"]
-    assert "paymentDate" not in recorded["invoice_payload"]
-    assert "amountPaidCurrency" not in recorded["invoice_payload"]
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
     app.dependency_overrides.clear()
 
 
@@ -794,9 +794,9 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Desenvolvimento de sistemas"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert "markAsPaid" not in recorded["invoice_payload"]
-    assert "paymentDate" not in recorded["invoice_payload"]
-    assert "amountPaidCurrency" not in recorded["invoice_payload"]
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 30450.0
     app.dependency_overrides.clear()
 
 
@@ -898,7 +898,6 @@ def test_solve_create_invoice_creates_customer_before_ledger_account_when_custom
     assert recorded["calls"] == [
         "GET /v2/customer",
         "POST /v2/customer",
-        "GET /v2/ledger/account",
         "POST /v2/order",
         "POST /v2/invoice",
     ]
@@ -909,7 +908,7 @@ def test_solve_create_invoice_creates_customer_before_ledger_account_when_custom
         "organizationNumber": "123456789",
     }
     assert recorded["order_payload"]["customer"]["id"] == 2009
-    assert recorded["order_payload"]["orderLines"][0]["account"]["number"] == "3000"
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Konsulentbistand"
     assert recorded["invoice_payload"]["customer"]["id"] == 2009
     app.dependency_overrides.clear()
 
@@ -930,8 +929,8 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert len(recorded["order_payload"]["orderLines"]) == 2
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
-    assert "markAsPaid" not in recorded["invoice_payload"]
-    assert "amountPaidCurrency" not in recorded["invoice_payload"]
+    assert recorded["invoice_payload"]["markAsPaid"] is True
+    assert recorded["invoice_payload"]["amountPaidCurrency"] == 39550.0
     app.dependency_overrides.clear()
 
 

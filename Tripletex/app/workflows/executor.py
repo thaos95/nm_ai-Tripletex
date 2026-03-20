@@ -104,6 +104,9 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate"),
         "creditNote": fields.get("creditNote"),
+        "markAsPaid": fields.get("markAsPaid"),
+        "paymentDate": fields.get("paymentDate"),
+        "amountPaidCurrency": fields.get("amountPaidCurrency"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
     }
@@ -121,6 +124,9 @@ def _build_minimal_invoice_payload(
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate") if include_due_date else None,
         "creditNote": fields.get("creditNote"),
+        "markAsPaid": fields.get("markAsPaid"),
+        "paymentDate": fields.get("paymentDate"),
+        "amountPaidCurrency": fields.get("amountPaidCurrency"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
     }
@@ -629,10 +635,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 else None
             )
         ledger_account_number = None
-        if not order_line_specs and product_id is None:
+        if not order_line_specs and product_id is None and fields.get("accountNumber") is not None:
             ledger_account_number = _resolve_ledger_account(
                 client,
-                str(fields.get("accountNumber") or "3000"),
+                str(fields.get("accountNumber")),
                 operations,
             )
         existing_order_id = order_spec.get("id")

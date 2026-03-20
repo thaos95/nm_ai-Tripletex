@@ -85,19 +85,19 @@ def tier2_transport(recorded: dict) -> httpx.MockTransport:
     [
         (
             "Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) pa 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.",
-            ["GET /v2/customer", "GET /v2/ledger/account", "POST /v2/order", "POST /v2/invoice"],
+            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"],
             "Skylagring",
             False,
         ),
         (
             'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.',
-            ["GET /v2/customer", "GET /v2/ledger/account", "POST /v2/order", "POST /v2/invoice"],
+            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"],
             "System Development",
             True,
         ),
         (
             'O cliente Floresta Lda (org. no 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
-            ["GET /v2/customer", "GET /v2/ledger/account", "POST /v2/order", "POST /v2/invoice"],
+            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"],
             "Desenvolvimento de sistemas",
             True,
         ),
@@ -126,10 +126,14 @@ def test_tier2_invoice_and_payment_workflow_matrix(
     assert recorded["calls"] == expected_calls
     assert recorded["order_payload"]["orderLines"][0]["description"] == expected_order_description
     assert "product" not in recorded["order_payload"]["orderLines"][0]
-    assert recorded["order_payload"]["orderLines"][0]["account"]["number"] == "3000"
-    assert "markAsPaid" not in recorded["invoice_payload"]
-    assert "paymentDate" not in recorded["invoice_payload"]
-    assert "amountPaidCurrency" not in recorded["invoice_payload"]
+    if payment_expected:
+        assert recorded["invoice_payload"]["markAsPaid"] is True
+        assert recorded["invoice_payload"]["paymentDate"] is not None
+        assert recorded["invoice_payload"]["amountPaidCurrency"] is not None
+    else:
+        assert "markAsPaid" not in recorded["invoice_payload"]
+        assert "paymentDate" not in recorded["invoice_payload"]
+        assert "amountPaidCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 
