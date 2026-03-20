@@ -160,6 +160,19 @@ PAYMENT_REVERSAL_TOKENS = [
     "outstanding amount",
 ]
 
+SUPPLIER_INVOICE_TOKENS = [
+    "supplier invoice",
+    "vendor invoice",
+    "leverandorfaktura",
+    "leverandorfakturaen",
+    "received invoice",
+    "mottatt faktura",
+    "inngaende faktura",
+    "incoming invoice",
+    "input vat",
+    "inngaende mva",
+]
+
 
 INTENT_THRESHOLDS = {
     "supplier_customer": 6,
@@ -212,6 +225,10 @@ def _contains_payment_intent(text: str) -> bool:
 
 def _contains_payment_reversal_intent(text: str) -> bool:
     return _contains_any(text, PAYMENT_REVERSAL_TOKENS)
+
+
+def _contains_supplier_invoice_intent(text: str) -> bool:
+    return _contains_any(text, SUPPLIER_INVOICE_TOKENS)
 
 
 def _normalized_text(text: str) -> str:
@@ -895,6 +912,11 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     supplier_detected = any(
         token in lowered for token in ["leverand", "supplier", "vendor", "fornecedor", "fournisseur", "lieferant", "proveedor"]
     )
+    supplier_invoice_detected = supplier_detected and (
+        _contains_supplier_invoice_intent(lowered)
+        or ("invoice" in lowered and any(token in lowered for token in ["including vat", "input vat", "office services", "account "]))
+        or ("faktura" in lowered and any(token in lowered for token in ["inkludert mva", "inngaende mva", "konto "]))
+    )
     payment_detected = any(
         token in lowered
         for token in [
@@ -919,6 +941,13 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     payment_detected = _contains_payment_intent(lowered)
     payment_reversal_detected = _contains_payment_reversal_intent(lowered)
     invoice_context_detected = any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"])
+    if supplier_invoice_detected:
+        return ParsedTask(
+            task_type=TaskType.UNSUPPORTED,
+            confidence=0.95,
+            language_hint=_language_hint(prompt),
+            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: supplier invoice workflows are not available via the configured endpoints"],
+        )
     if supplier_detected:
         entity = "customer"
         action = "create"

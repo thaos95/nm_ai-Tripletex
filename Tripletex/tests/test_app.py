@@ -964,6 +964,32 @@ def test_validate_reports_customer_not_found_before_invoice_creation() -> None:
     app.dependency_overrides.clear()
 
 
+def test_solve_supplier_invoice_prompt_is_rejected_as_unsupported() -> None:
+    recorded = {}
+
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "We have received invoice INV-2026-9601 from the supplier Oakwood Ltd (org no. 967247049) for 79750 NOK including VAT. The amount relates to office services (account 6540). Register the supplier invoice with the correct input VAT (25%).",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Unsupported task"
+    assert recorded.get("calls") is None
+    app.dependency_overrides.clear()
+
+
 def test_validate_reports_ledger_account_missing_when_not_confirmed() -> None:
     def transport() -> httpx.MockTransport:
         def handler(request: httpx.Request) -> httpx.Response:

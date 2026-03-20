@@ -120,6 +120,14 @@ def test_parse_supplier_customer_with_address() -> None:
     assert validated.parsed_task.related_entities["customer_address"]["city"] == "Bergen"
 
 
+def test_parse_supplier_invoice_prompt_is_unsupported() -> None:
+    parsed = parse_prompt(
+        "We have received invoice INV-2026-9601 from the supplier Oakwood Ltd (org no. 967247049) for 79750 NOK including VAT. The amount relates to office services (account 6540). Register the supplier invoice with the correct input VAT (25%)."
+    )
+    assert parsed.task_type == TaskType.UNSUPPORTED
+    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in parsed.notes[0]
+
+
 def test_parse_employee_with_birth_and_start_dates() -> None:
     parsed = parse_prompt(
         "Me har ein ny tilsett som heiter Arne Berge, fødd 21. December 2000. Opprett vedkomande som tilsett med e-post arne.berge@example.org og startdato 14. April 2026."
