@@ -71,6 +71,10 @@ def tier2_transport(recorded: dict) -> httpx.MockTransport:
             recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 6001}})
 
+        if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
+            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 6001}})
+
         if request.method == "POST" and request.url.path == "/v2/project":
             recorded["project_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 7001}})
@@ -91,13 +95,13 @@ def tier2_transport(recorded: dict) -> httpx.MockTransport:
         ),
         (
             'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.',
-            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"],
+            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice", "PUT /v2/invoice/6001/:payment"],
             "System Development",
             True,
         ),
         (
             'O cliente Floresta Lda (org. no 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
-            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"],
+            ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice", "PUT /v2/invoice/6001/:payment"],
             "Desenvolvimento de sistemas",
             True,
         ),
@@ -127,9 +131,9 @@ def test_tier2_invoice_and_payment_workflow_matrix(
     assert recorded["order_payload"]["orderLines"][0]["description"] == expected_order_description
     assert "product" not in recorded["order_payload"]["orderLines"][0]
     if payment_expected:
-        assert recorded["invoice_payload"]["markAsPaid"] is True
-        assert recorded["invoice_payload"]["paymentDate"] is not None
-        assert recorded["invoice_payload"]["amountPaidCurrency"] is not None
+        assert "markAsPaid" not in recorded["invoice_payload"]
+        assert recorded["invoice_payment_payload"]["paymentDate"] is not None
+        assert recorded["invoice_payment_payload"]["amountPaidCurrency"] is not None
     else:
         assert "markAsPaid" not in recorded["invoice_payload"]
         assert "paymentDate" not in recorded["invoice_payload"]

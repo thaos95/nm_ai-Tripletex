@@ -14,14 +14,6 @@ PREFLIGHT_ENFORCED_TASKS = {
 }
 
 
-SOLVE_BLOCKING_CODES = {
-    "COMPANY_BANK_ACCOUNT_MISSING",
-    "CUSTOMER_BANK_ACCOUNT_MISSING",
-    "EMPLOYMENT_MISSING_FOR_PERIOD",
-    "NOT_SUPPORTED_VIA_AVAILABLE_API",
-}
-
-
 def _operation_name(task: ParsedTask) -> str:
     mapping = {
         TaskType.CREATE_INVOICE: "Opprette faktura",

@@ -81,8 +81,8 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
         steps.extend(
             [
                 PlannedStep(name="resolve-credit-customer", resource="customer", action="resolve"),
-                PlannedStep(name="create-credit-order", resource="order", action="create"),
-                PlannedStep(name="create-credit-note", resource="invoice", action="create"),
+                PlannedStep(name="resolve-credit-invoice", resource="invoice", action="resolve"),
+                PlannedStep(name="create-credit-note", resource="invoice", action="update"),
             ]
         )
     elif task_type == TaskType.CREATE_PROJECT_BILLING:

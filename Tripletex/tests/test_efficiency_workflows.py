@@ -43,6 +43,10 @@ def efficiency_transport(recorded: dict) -> httpx.MockTransport:
             recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 6001}})
 
+        if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
+            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 6001}})
+
         if request.method == "POST" and request.url.path == "/v2/project":
             recorded.setdefault("project_payloads", []).append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(200, json={"value": {"id": 4001}})
@@ -122,10 +126,11 @@ def test_payment_workflow_keeps_same_call_count_and_carries_payment_fields() -> 
         "GET /v2/customer",
         "POST /v2/order",
         "POST /v2/invoice",
+        "PUT /v2/invoice/6001/:payment",
     ]
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["paymentDate"] is not None
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert recorded["invoice_payment_payload"]["paymentDate"] is not None
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 32200.0
     app.dependency_overrides.clear()
 
 

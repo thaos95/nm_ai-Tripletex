@@ -303,7 +303,22 @@ def _first_match(regex: re.Pattern, text: str) -> Optional[str]:
 
 
 def _clean_name(value: str) -> str:
-    for marker in [" (org no", " (org.nr", " med ", " with ", " som ", " for ", " linked to ", " knyttet til ", ",", "."]:
+    for marker in [
+        " (org no",
+        " (org.nr",
+        " med ",
+        " with ",
+        " som ",
+        " for ",
+        " linked to ",
+        " knyttet til ",
+        " avec le numéro",
+        " avec le numero",
+        " con número",
+        " con numero",
+        ",",
+        ".",
+    ]:
         if marker in value:
             value = value.split(marker, 1)[0]
     return value.strip(" .,:;")
@@ -1105,12 +1120,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if not ((project_context and billing_phrase) or (rate_signal and hours_signal)):
             project_billing_detected = False
     dimension_voucher_detected = (
-        any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimensjon", "dimensao contabilistica", "dimensao contabilistica", "dimensao contabilistica"])
-        and any(token in lowered for token in ["voucher", "bilag", "document", "dokument", "lance um documento", "post a document", "bokfor"])
+        any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimension comptable", "dimensjon", "dimensao contabilistica", "dimensao contabilistica", "dimensao contabilistica"])
+        and any(token in lowered for token in ["voucher", "bilag", "document", "dokument", "piece", "pièce", "lance um documento", "post a document", "comptabilisez", "bokfor"])
     )
     payroll_detected = any(
         token in lowered
-        for token in ["run payroll", "payroll", "lonn", "salary", "bonus", "payroll expense", "salary api"]
+        for token in ["run payroll", "payroll", "paie", "salaire", "salario", "salário", "lonn", "salary", "bonus", "prime", "bónus", "payroll expense", "salary api"]
     )
 
     if classified_intent == "supplier_customer":
@@ -1415,6 +1430,18 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         amount = _extract_amount(prompt)
         day_count = _extract_day_count(prompt)
         daily_rate = _extract_daily_rate(prompt)
+        if day_count is None:
+            fallback_day_match = re.search(r"(\d+)\s*(?:tage|tag|jours|dias|d[ií]as)\b", prompt, re.IGNORECASE)
+            if fallback_day_match:
+                day_count = int(fallback_day_match.group(1))
+        if daily_rate is None:
+            fallback_rate_match = re.search(
+                r"(?:tagessatz|tarifa diaria|tasa diaria|taux journalier)[^\d\n]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b",
+                prompt,
+                re.IGNORECASE,
+            )
+            if fallback_rate_match:
+                daily_rate = float(fallback_rate_match.group(1).replace(",", "."))
         expense_amounts = _extract_currency_amounts(prompt)
         if day_count is not None and daily_rate is not None:
             amount = float(day_count * daily_rate)

@@ -38,6 +38,25 @@ def advanced_transport(recorded: dict) -> httpx.MockTransport:
             recorded.setdefault("invoice_payloads", []).append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(200, json={"value": {"id": 6001}})
 
+        if request.method == "GET" and request.url.path == "/v2/invoice":
+            return httpx.Response(
+                200,
+                json={
+                    "values": [
+                        {
+                            "id": 6001,
+                            "customer": {"id": 2001},
+                            "description": "Konsulenttimar",
+                            "amountExcludingVatCurrency": 16200.0,
+                        }
+                    ]
+                },
+            )
+
+        if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:createCreditNote":
+            recorded["credit_note_response"] = {"id": 6101}
+            return httpx.Response(200, json={"value": {"id": 6101}})
+
         if request.method == "POST" and request.url.path == "/v2/project":
             recorded.setdefault("project_payloads", []).append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(200, json={"value": {"id": 4001}})
@@ -77,10 +96,10 @@ def test_credit_note_workflow_creates_credit_invoice_payload() -> None:
     assert response.status_code == 200
     assert recorded["calls"] == [
         "GET /v2/customer",
-        "POST /v2/order",
-        "POST /v2/invoice",
+        "GET /v2/invoice",
+        "PUT /v2/invoice/6001/:createCreditNote",
     ]
-    assert recorded["invoice_payloads"][0]["creditNote"] is True
+    assert recorded["credit_note_response"]["id"] == 6101
     app.dependency_overrides.clear()
 
 
@@ -109,13 +128,14 @@ def test_project_billing_workflow_creates_project_then_invoice() -> None:
     assert recorded["project_payloads"][0]["projectManager"]["id"] == 1001
     assert recorded["invoice_payloads"][0] == {
         "invoiceDate": recorded["invoice_payloads"][0]["invoiceDate"],
+        "invoiceDueDate": recorded["invoice_payloads"][0]["invoiceDueDate"],
         "customer": {"id": 2001},
         "orders": [{"id": 5001}],
     }
     app.dependency_overrides.clear()
 
 
-def test_german_project_billing_prompt_uses_minimal_invoice_payload() -> None:
+def test_german_project_billing_prompt_keeps_invoice_due_date() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: advanced_transport(recorded)
     client = TestClient(app)
@@ -140,6 +160,7 @@ def test_german_project_billing_prompt_uses_minimal_invoice_payload() -> None:
     assert recorded["order_payloads"][0]["orderLines"][0]["description"] == "Design"
     assert recorded["invoice_payloads"][0] == {
         "invoiceDate": recorded["invoice_payloads"][0]["invoiceDate"],
+        "invoiceDueDate": recorded["invoice_payloads"][0]["invoiceDueDate"],
         "customer": {"id": 2001},
         "orders": [{"id": 5001}],
     }
@@ -167,8 +188,9 @@ def test_dimension_voucher_workflow_creates_dimension_values_and_voucher() -> No
         "POST /v2/ledger/accountingDimensionValue",
         "POST /v2/ledger/voucher",
     ]
-    assert recorded["dimension_payload"]["name"] == "Marked"
-    assert recorded["voucher_payloads"][0]["voucherLines"][0]["account"]["number"] == "6590"
+    assert recorded["dimension_payload"]["description"] == "Marked"
+    assert recorded["dimension_value_payloads"][0]["description"] == "Bedrift"
+    assert recorded["voucher_payloads"][0]["postings"][0]["account"]["number"] == "6590"
     app.dependency_overrides.clear()
 
 
@@ -193,6 +215,6 @@ def test_payroll_voucher_workflow_uses_manual_voucher_fallback() -> None:
     ]
     voucher_payload = recorded["voucher_payloads"][0]
     assert voucher_payload["employee"]["id"] == 1002
-    assert voucher_payload["voucherLines"][0]["account"]["number"] == "5000"
-    assert voucher_payload["voucherLines"][0]["amount"] == 50400.0
+    assert voucher_payload["postings"][0]["account"]["number"] == "5000"
+    assert voucher_payload["postings"][0]["amount"] == 50400.0
     app.dependency_overrides.clear()

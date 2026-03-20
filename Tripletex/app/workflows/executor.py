@@ -117,9 +117,6 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate"),
         "creditNote": fields.get("creditNote"),
-        "markAsPaid": fields.get("markAsPaid"),
-        "paymentDate": fields.get("paymentDate"),
-        "amountPaidCurrency": fields.get("amountPaidCurrency"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
     }
@@ -132,7 +129,6 @@ def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) ->
         "invoiceNumber": fields.get("invoiceNumber"),
         "supplier": {"id": supplier_id},
         "amount": fields.get("amount"),
-        "account": {"number": str(fields.get("accountNumber"))} if fields.get("accountNumber") is not None else None,
         "vatPercentage": fields.get("vatPercentage"),
     }
     return _compact_payload(payload)
@@ -149,11 +145,16 @@ def _build_minimal_invoice_payload(
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate") if include_due_date else None,
         "creditNote": fields.get("creditNote"),
-        "markAsPaid": fields.get("markAsPaid"),
-        "paymentDate": fields.get("paymentDate"),
-        "amountPaidCurrency": fields.get("amountPaidCurrency"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
+    }
+    return _compact_payload(payload)
+
+
+def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "paymentDate": fields.get("paymentDate"),
+        "amountPaidCurrency": fields.get("amountPaidCurrency"),
     }
     return _compact_payload(payload)
 
@@ -166,11 +167,11 @@ def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: Trip
 
 
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
-    return _compact_payload({"name": fields.get("dimensionName")})
+    return _compact_payload({"description": fields.get("dimensionName")})
 
 
 def _build_dimension_value_payload(dimension_id: int, value_name: str) -> Dict[str, Any]:
-    return _compact_payload({"accountingDimensionName": {"id": dimension_id}, "name": value_name})
+    return _compact_payload({"accountingDimensionName": {"id": dimension_id}, "description": value_name})
 
 
 def _build_voucher_payload(
@@ -196,7 +197,7 @@ def _build_voucher_payload(
     payload = {
         "date": fields.get("date") or _today_iso(),
         "description": description,
-        "voucherLines": [debit_line, credit_line],
+        "postings": [debit_line, credit_line],
     }
     return _compact_payload(payload)
 
@@ -521,6 +522,104 @@ def _create_invoice_with_fallback(
     return response
 
 
+def _register_invoice_payment(
+    client: TripletexClient,
+    invoice_id: Optional[int],
+    fields: Dict[str, Any],
+    operations: list,
+) -> None:
+    if invoice_id is None or not fields.get("markAsPaid"):
+        return
+    response = client._request(
+        "PUT",
+        "/invoice/{0}/:payment".format(int(invoice_id)),
+        json=_build_invoice_payment_payload(fields),
+    )
+    operations.append(
+        OperationResult(name="register-invoice-payment", resource_id=int(invoice_id), payload=response)
+    )
+
+
+def _resolve_credit_note_invoice(
+    client: TripletexClient,
+    customer_id: int,
+    fields: Dict[str, Any],
+    related: Dict[str, Any],
+    operations: list,
+) -> Optional[int]:
+    invoice_description = (
+        related.get("invoice", {}).get("description")
+        or related.get("order", {}).get("description")
+        or related.get("product", {}).get("description")
+    )
+    target_amount = abs(float(fields["amount"])) if fields.get("amount") is not None else None
+    response = client.list_resource("invoice", fields="*", count=200, customerId=customer_id)
+    values = response.get("values", [])
+
+    def _candidate_customer_id(candidate: Dict[str, Any]) -> Optional[int]:
+        customer = candidate.get("customer")
+        if isinstance(customer, dict):
+            return customer.get("id")
+        return None
+
+    def _candidate_description(candidate: Dict[str, Any]) -> str:
+        for key in ("description", "invoiceText", "comment"):
+            value = candidate.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    def _candidate_amount(candidate: Dict[str, Any]) -> Optional[float]:
+        for key in ("amountExcludingVatCurrency", "amount", "netAmount"):
+            value = candidate.get(key)
+            if value is not None:
+                try:
+                    return abs(float(value))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    filtered = [
+        candidate
+        for candidate in values
+        if _candidate_customer_id(candidate) in {None, customer_id}
+    ]
+    if invoice_description:
+        desc_norm = str(invoice_description).strip().lower()
+        filtered = [
+            candidate
+            for candidate in filtered
+            if desc_norm in _candidate_description(candidate).strip().lower()
+        ] or filtered
+    if target_amount is not None:
+        filtered = [
+            candidate
+            for candidate in filtered
+            if _candidate_amount(candidate) == target_amount
+        ] or filtered
+
+    invoice = filtered[0] if filtered else None
+    invoice_id = invoice.get("id") if invoice else None
+    operations.append(
+        OperationResult(
+            name="resolve-credit-invoice",
+            resource_id=invoice_id,
+            payload={"invoice": invoice, "matched_count": len(filtered)},
+        )
+    )
+    return int(invoice_id) if invoice_id is not None else None
+
+
+def _create_credit_note(
+    client: TripletexClient,
+    invoice_id: int,
+    operations: list,
+) -> Dict[str, Any]:
+    response = client._request("PUT", "/invoice/{0}/:createCreditNote".format(invoice_id))
+    operations.append(OperationResult(name="create-credit-note", resource_id=invoice_id, payload=response))
+    return response
+
+
 def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResult:
     task_type = plan.parsed_task.task_type
     fields = dict(plan.parsed_task.fields)
@@ -715,7 +814,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 order_line_specs=order_line_specs,
                 ledger_account_number=ledger_account_number,
             )
-        _create_invoice_with_fallback(
+        invoice_response = _create_invoice_with_fallback(
             client,
             fields,
             customer_id,
@@ -723,6 +822,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             operations,
             operation_name="create-invoice",
         )
+        _register_invoice_payment(client, _extract_id(invoice_response), fields, operations)
 
     elif task_type == TaskType.CREATE_SUPPLIER_INVOICE:
         supplier_spec = related.get("supplier", {})
@@ -741,13 +841,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
-        product_spec = dict(related.get("product", {}))
-        invoice_spec = dict(related.get("invoice", {}))
-        order_spec = dict(related.get("order", {}))
-        if invoice_spec.get("description") and "description" not in product_spec:
-            product_spec["description"] = invoice_spec["description"]
-        if order_spec.get("description") and "description" not in product_spec:
-            product_spec["description"] = order_spec["description"]
         customer_id = _resolve_customer(
             client,
             customer_spec,
@@ -756,16 +849,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if customer_id is None:
             raise TripletexClientError("Credit note requires resolvable customer")
-        order_id = _create_order(client, customer_id, None, fields, product_spec, operations)
-        _create_invoice_with_fallback(
-            client,
-            fields,
-            customer_id,
-            order_id,
-            operations,
-            operation_name="create-credit-note",
-            minimal_first=True,
-        )
+        invoice_id = _resolve_credit_note_invoice(client, customer_id, fields, related, operations)
+        if invoice_id is None:
+            raise TripletexClientError("Credit note requires resolvable invoice")
+        _create_credit_note(client, invoice_id, operations)
 
     elif task_type == TaskType.CREATE_PROJECT_BILLING:
         payload = _build_project_payload(fields)
@@ -811,7 +898,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             order_id,
             operations,
             operation_name="create-billing-invoice",
-            minimal_first=True,
         )
 
     elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:

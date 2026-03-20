@@ -67,8 +67,8 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
     ),
     TaskType.CREATE_CREDIT_NOTE: TaskContract(
         task_type=TaskType.CREATE_CREDIT_NOTE,
-        allowed_endpoints=["/customer", "/order", "/invoice"],
-        prerequisites=["customer", "order line source"],
+        allowed_endpoints=["/customer", "/invoice"],
+        prerequisites=["customer", "invoice reference"],
         recoverable_errors=[TripletexErrorCategory.NO_RESULTS, TripletexErrorCategory.VALIDATION_GENERIC],
         terminal_errors=[TripletexErrorCategory.UNAUTHORIZED, TripletexErrorCategory.WRONG_ENDPOINT],
     ),

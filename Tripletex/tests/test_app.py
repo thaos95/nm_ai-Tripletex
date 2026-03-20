@@ -157,6 +157,10 @@ def recording_transport(recorded: dict) -> httpx.MockTransport:
             recorded["invoice_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 6001}})
 
+        if request.method == "PUT" and request.url.path == "/v2/invoice/6001/:payment":
+            recorded["invoice_payment_payload"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(200, json={"value": {"id": 6001}})
+
         if request.method == "POST" and request.url.path == "/v2/department":
             recorded.setdefault("department_payloads", []).append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(200, json={"value": {"id": len(recorded["department_payloads"])}})
@@ -773,9 +777,9 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "System Development"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 32200.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 32200.0
     app.dependency_overrides.clear()
 
 
@@ -794,9 +798,9 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert response.status_code == 200
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Desenvolvimento de sistemas"
     assert recorded["invoice_payload"]["invoiceDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["paymentDate"] == TODAY_ISO
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 30450.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 30450.0
     app.dependency_overrides.clear()
 
 
@@ -929,8 +933,8 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert len(recorded["order_payload"]["orderLines"]) == 2
     assert recorded["order_payload"]["orderLines"][0]["description"] == "Netzwerkdienst"
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
-    assert recorded["invoice_payload"]["markAsPaid"] is True
-    assert recorded["invoice_payload"]["amountPaidCurrency"] == 39550.0
+    assert "markAsPaid" not in recorded["invoice_payload"]
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == 39550.0
     app.dependency_overrides.clear()
 
 
@@ -1078,8 +1082,10 @@ def test_solve_dimension_voucher_uses_stable_ledger_dimension_endpoints() -> Non
         def handler(request: httpx.Request) -> httpx.Response:
             recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
             if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionName":
+                recorded["dimension_payload"] = json.loads(request.content.decode("utf-8"))
                 return httpx.Response(200, json={"value": {"id": 8101}})
             if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionValue":
+                recorded.setdefault("dimension_value_payloads", []).append(json.loads(request.content.decode("utf-8")))
                 return httpx.Response(200, json={"value": {"id": 8102}})
             if request.method == "POST" and request.url.path == "/v2/ledger/voucher":
                 return httpx.Response(200, json={"value": {"id": 8103}})
@@ -1104,6 +1110,8 @@ def test_solve_dimension_voucher_uses_stable_ledger_dimension_endpoints() -> Non
         "POST /v2/ledger/accountingDimensionValue",
         "POST /v2/ledger/voucher",
     ]
+    assert recorded["dimension_payload"]["description"] == "Marked"
+    assert recorded["dimension_value_payloads"][0]["description"] == "Bedrift"
     app.dependency_overrides.clear()
 
 
