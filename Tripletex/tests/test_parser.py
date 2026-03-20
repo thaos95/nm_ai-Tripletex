@@ -135,6 +135,17 @@ def test_parse_invoice_with_description_and_dates() -> None:
     assert validated.parsed_task.related_entities["invoice"]["description"] == "Rapport d'analyse"
 
 
+def test_parse_spanish_invoice_uses_description_phrase() -> None:
+    parsed = parse_prompt(
+        'Crea y envía una factura al cliente Montaña SL (org. nº 831306742) por 48600 NOK sin IVA. La factura es por Licencia de software.'
+    )
+    validated = validate_and_normalize_task(parsed)
+    assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
+    assert validated.parsed_task.related_entities["customer"]["organizationNumber"] == "831306742"
+    assert validated.parsed_task.related_entities["invoice"]["description"] == "Licencia de software"
+    assert validated.parsed_task.related_entities["order"]["description"] == "Licencia de software"
+
+
 def test_parse_payment_prompt_maps_to_invoice_flow() -> None:
     parsed = parse_prompt(
         'The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.'

@@ -598,8 +598,9 @@ def test_solve_create_product_preserves_number_and_vat() -> None:
         },
     )
     assert response.status_code == 200
-    assert recorded["product_payload"]["productNumber"] == "3113"
     assert recorded["product_payload"]["vatPercentage"] == 15.0
+    assert recorded["product_payload"]["name"] == "Havregryn"
+    assert "productNumber" not in recorded["product_payload"]
     app.dependency_overrides.clear()
 
 
@@ -620,6 +621,23 @@ def test_solve_create_invoice_uses_description_when_product_missing() -> None:
     assert recorded["order_payload"]["orderDate"] == "2026-03-19"
     assert recorded["order_payload"]["deliveryDate"] == "2026-03-19"
     assert recorded["invoice_payload"]["sendByEmail"] is True
+    app.dependency_overrides.clear()
+
+
+def test_solve_spanish_invoice_uses_description_phrase() -> None:
+    recorded = {}
+    app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Crea y envía una factura al cliente Montaña SL (org. nº 831306742) por 48600 NOK sin IVA. La factura es por Licencia de software.',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["order_payload"]["orderLines"][0]["description"] == "Licencia de software"
     app.dependency_overrides.clear()
 
 

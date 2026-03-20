@@ -20,12 +20,15 @@ CREATE_WORDS = [
     "registrer",
     "lag",
     "create",
+    "crea",
     "crear",
     "criar",
     "erstellen",
     "creer",
     "créez",
     "creez",
+    "envia",
+    "envía",
     "registre",
     "registrieren",
     "anlegen",
@@ -371,6 +374,18 @@ def _extract_invoice_description(prompt: str) -> Optional[str]:
     return None
 
 
+def _extract_invoice_description_fallback(prompt: str) -> Optional[str]:
+    patterns = [
+        r"(?:factura\s+es\s+por|invoice\s+is\s+for|facture\s+est\s+pour)\s+([A-Z][^.\n]+)",
+        r"(?:gjeld)\s+([A-Z][^.\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return None
+
+
 def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     lowered = _normalized_text(prompt)
     action = _detect_action(lowered)
@@ -661,6 +676,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if amount is not None and "product" in related_entities:
             related_entities["product"]["priceExcludingVatCurrency"] = amount
         description = _extract_invoice_description(prompt)
+        if not description:
+            description = _extract_invoice_description_fallback(prompt)
         if description:
             related_entities.setdefault("order", {})["description"] = description
         return ParsedTask(
@@ -685,6 +702,8 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             else:
                 related_entities.setdefault("invoice", {})["amountExcludingVatCurrency"] = amount
         description = _extract_invoice_description(prompt)
+        if not description:
+            description = _extract_invoice_description_fallback(prompt)
         if description:
             related_entities.setdefault("invoice", {})["description"] = description
             related_entities.setdefault("order", {})["description"] = description

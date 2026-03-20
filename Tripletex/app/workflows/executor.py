@@ -14,6 +14,15 @@ def _compact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return dict((key, value) for key, value in payload.items() if value is not None)
 
 
+def _build_product_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {"name": spec.get("name")}
+    if spec.get("priceExcludingVatCurrency") is not None:
+        payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
+    if spec.get("vatPercentage") is not None:
+        payload["vatPercentage"] = spec["vatPercentage"]
+    return _compact_payload(payload)
+
+
 def _resolve_customer(client: TripletexClient, spec: Dict[str, Any], operations: list) -> Optional[int]:
     match_fields = {}
     if spec.get("email"):
@@ -105,14 +114,7 @@ def _resolve_product(client: TripletexClient, spec: Dict[str, Any], operations: 
     if not spec.get("name"):
         return None
 
-    payload = {"name": spec["name"]}
-    if spec.get("priceExcludingVatCurrency") is not None:
-        payload["priceExcludingVatCurrency"] = spec["priceExcludingVatCurrency"]
-    if spec.get("productNumber"):
-        payload["productNumber"] = spec["productNumber"]
-    if spec.get("vatPercentage") is not None:
-        payload["vatPercentage"] = spec["vatPercentage"]
-    response = client.create_resource("product", _compact_payload(payload))
+    response = client.create_resource("product", _build_product_payload(spec))
     product_id = _extract_id(response)
     operations.append(OperationResult(name="create-product", resource_id=product_id, payload=response))
     return product_id
@@ -229,7 +231,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="search-customers", payload=response))
 
     elif task_type == TaskType.CREATE_PRODUCT:
-        response = client.create_resource("product", _compact_payload(fields))
+        response = client.create_resource("product", _build_product_payload(fields))
         operations.append(OperationResult(name="create-product", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_PROJECT:
