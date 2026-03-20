@@ -447,6 +447,55 @@ def _extract_vat_percentage(prompt: str) -> Optional[float]:
     return float(match.group(1).replace(",", "."))
 
 
+def _extract_account_number(prompt: str) -> Optional[str]:
+    match = re.search(r"(?:account|konto|conta)\s+(\d{4})", prompt, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_percentage(prompt: str) -> Optional[float]:
+    match = re.search(r"(\d{1,3}(?:[.,]\d+)?)\s*%", prompt)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def _extract_dimension_name(prompt: str) -> Optional[str]:
+    quoted_values = [value.strip() for value in QUOTED_RE.findall(prompt) if value.strip()]
+    if quoted_values:
+        return quoted_values[0]
+    patterns = [
+        r"(?:custom accounting dimension|accounting dimension|dimensjon(?:en)?|dimens[aã]o contabil[íi]stica)\s+['\"]([^'\"]+)['\"]",
+        r"(?:custom accounting dimension|accounting dimension|dimensjon(?:en)?|dimens[aã]o contabil[íi]stica)\s+([A-Z][^,.\\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return None
+
+
+def _extract_dimension_value_names(prompt: str) -> List[str]:
+    quoted_values = [value.strip() for value in QUOTED_RE.findall(prompt) if value.strip()]
+    if len(quoted_values) >= 2:
+        seen = set()
+        values: List[str] = []
+        for value in quoted_values[1:]:
+            if value not in seen:
+                seen.add(value)
+                values.append(value)
+        return values
+    return []
+
+
+def _extract_selected_dimension_value(prompt: str, value_names: List[str]) -> Optional[str]:
+    for value_name in value_names:
+        if re.search(r"\b{0}\b".format(re.escape(value_name)), prompt, re.IGNORECASE):
+            return value_name
+    return value_names[0] if value_names else None
+
+
 def _extract_department_names(prompt: str) -> List[str]:
     names = [name.strip() for name in QUOTED_RE.findall(prompt) if name.strip()]
     if names:
@@ -536,6 +585,27 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         action = "create"
     if "project" in lowered or "prosjekt" in lowered or "projeto" in lowered or "proyecto" in lowered:
         entity = "project"
+
+    credit_note_detected = any(
+        token in lowered
+        for token in ["kreditnota", "credit note", "credit memo", "nota de credito", "nota de credito", "avoir"]
+    )
+    project_billing_detected = (
+        entity == "project"
+        and any(token in lowered for token in ["fastpris", "fixed price", "partial payment", "delbetaling", "fakturer kunden", "bill the customer", "fatur", "invoice customer"])
+    )
+    dimension_voucher_detected = (
+        any(token in lowered for token in ["custom accounting dimension", "accounting dimension", "dimensjon", "dimensao contabilistica", "dimensao contabilistica", "dimensao contabilistica"])
+        and any(token in lowered for token in ["voucher", "bilag", "document", "dokument", "lance um documento", "post a document", "bokfor"])
+    )
+    payroll_detected = any(
+        token in lowered
+        for token in ["run payroll", "payroll", "lonn", "salary", "bonus", "payroll expense", "salary api"]
+    )
+
+    if credit_note_detected:
+        entity = "invoice"
+        action = "create"
 
     if entity == "employee" and action == "create":
         first_name, last_name = _extract_employee_name(prompt)
@@ -665,6 +735,54 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             match_fields=match_fields,
         )
 
+    if project_billing_detected:
+        project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projeto", "projekt"])
+        fields["name"] = project_name or "Unknown Project"
+        fields["startDate"] = fields.get("date") or _today_iso()
+        fields["invoiceDate"] = fields.get("date") or _today_iso()
+        fields["invoiceDueDate"] = fields["invoiceDate"]
+        fields["orderDate"] = fields["invoiceDate"]
+        fields["deliveryDate"] = fields["invoiceDate"]
+        fixed_price_amount = _extract_amount(prompt)
+        billing_percentage = _extract_percentage(prompt)
+        if fixed_price_amount is not None:
+            fields["fixedPriceAmountCurrency"] = fixed_price_amount
+        if billing_percentage is not None:
+            fields["billingPercentage"] = billing_percentage
+            if fixed_price_amount is not None:
+                fields["amount"] = round(fixed_price_amount * billing_percentage / 100.0, 2)
+        customer_name = _extract_project_customer_name(prompt)
+        if customer_name:
+            related_entities["customer"] = {"name": customer_name, "isCustomer": True}
+            org_number = _extract_org_number(prompt)
+            if org_number:
+                related_entities["customer"]["organizationNumber"] = org_number
+                match_fields["customerOrganizationNumber"] = org_number
+        manager_name = _extract_project_manager_name_safe(prompt)
+        if manager_name:
+            manager_first_name, manager_last_name = _split_person_name(manager_name)
+            related_entities["project_manager"] = {}
+            if manager_first_name:
+                related_entities["project_manager"]["first_name"] = manager_first_name
+            if manager_last_name:
+                related_entities["project_manager"]["last_name"] = manager_last_name
+            if "email" in fields:
+                related_entities["project_manager"]["email"] = fields["email"]
+        if fields.get("amount") is not None:
+            related_entities["invoice"] = {
+                "description": "Partial billing {0}% of fixed price".format(int(billing_percentage or 100)),
+                "amountExcludingVatCurrency": fields["amount"],
+            }
+            related_entities["order"] = {"description": related_entities["invoice"]["description"]}
+        return ParsedTask(
+            task_type=TaskType.CREATE_PROJECT_BILLING,
+            confidence=0.8,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+            match_fields=match_fields,
+            related_entities=related_entities,
+        )
+
     if entity == "project" and action == "create":
         project_name = _extract_named_entity(prompt, ["prosjekt", "project", "proyecto", "projeto", "projekt"])
         fields["name"] = project_name or "Unknown Project"
@@ -745,6 +863,49 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             fields=fields,
         )
 
+    if dimension_voucher_detected:
+        fields["date"] = fields.get("date") or _today_iso()
+        dimension_name = _extract_dimension_name(prompt)
+        if dimension_name:
+            fields["dimensionName"] = dimension_name
+        dimension_values = _extract_dimension_value_names(prompt)
+        if dimension_values:
+            fields["dimensionValues"] = "||".join(dimension_values)
+            selected_value = _extract_selected_dimension_value(prompt, dimension_values)
+            if selected_value:
+                fields["selectedDimensionValue"] = selected_value
+        account_number = _extract_account_number(prompt)
+        if account_number:
+            fields["accountNumber"] = account_number
+        amount = _extract_amount(prompt)
+        if amount is not None:
+            fields["amount"] = amount
+        return ParsedTask(
+            task_type=TaskType.CREATE_DIMENSION_VOUCHER,
+            confidence=0.74,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+        )
+
+    if payroll_detected:
+        fields["date"] = fields.get("date") or _today_iso()
+        amounts = [float(value.replace(",", ".")) for value in re.findall(r"(\d+(?:[.,]\d{1,2})?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)]
+        if amounts:
+            fields["baseSalaryCurrency"] = amounts[0]
+        if len(amounts) > 1:
+            fields["bonusCurrency"] = amounts[1]
+        if amounts:
+            fields["amount"] = sum(amounts[:2]) if len(amounts) > 1 else amounts[0]
+        if "email" in fields:
+            related_entities["employee"] = {"email": fields["email"]}
+        return ParsedTask(
+            task_type=TaskType.CREATE_PAYROLL_VOUCHER,
+            confidence=0.7,
+            language_hint=_language_hint(prompt),
+            fields=fields,
+            related_entities=related_entities,
+        )
+
     if entity == "ledger_account" and action == "read":
         fields["fields"] = "id,number,name"
         fields["count"] = 100
@@ -814,6 +975,25 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             fields["paymentDate"] = fields["invoiceDate"]
             if amount is not None:
                 fields["amountPaidCurrency"] = amount
+        if credit_note_detected:
+            fields["creditNote"] = True
+            if amount is not None:
+                fields["amount"] = -abs(amount)
+                related_entities.setdefault("invoice", {})["amountExcludingVatCurrency"] = fields["amount"]
+            related_entities.setdefault("invoice", {})["description"] = (
+                related_entities.get("invoice", {}).get("description")
+                or related_entities.get("order", {}).get("description")
+                or "Credit note"
+            )
+            related_entities.setdefault("order", {})["description"] = related_entities["invoice"]["description"]
+            return ParsedTask(
+                task_type=TaskType.CREATE_CREDIT_NOTE,
+                confidence=0.78,
+                language_hint=_language_hint(prompt),
+                fields=fields,
+                match_fields=match_fields,
+                related_entities=related_entities,
+            )
         return ParsedTask(
             task_type=TaskType.CREATE_INVOICE,
             confidence=0.79,

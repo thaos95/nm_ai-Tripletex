@@ -52,6 +52,10 @@ Use these task types exactly:
 - create_department
 - create_order
 - create_invoice
+- create_credit_note
+- create_project_billing
+- create_dimension_voucher
+- create_payroll_voucher
 - create_travel_expense
 - delete_travel_expense
 - delete_voucher

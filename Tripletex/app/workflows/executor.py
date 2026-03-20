@@ -77,8 +77,45 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
         "markAsPaid": fields.get("markAsPaid"),
         "paymentDate": fields.get("paymentDate"),
         "amountPaidCurrency": fields.get("amountPaidCurrency"),
+        "creditNote": fields.get("creditNote"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
+    }
+    return _compact_payload(payload)
+
+
+def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    return _compact_payload({"name": fields.get("dimensionName")})
+
+
+def _build_dimension_value_payload(dimension_id: int, value_name: str) -> Dict[str, Any]:
+    return _compact_payload({"dimension": {"id": dimension_id}, "name": value_name})
+
+
+def _build_voucher_payload(
+    fields: Dict[str, Any],
+    description: str,
+    account_number: str,
+    amount: float,
+    dimension_value_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    debit_line: Dict[str, Any] = {
+        "account": {"number": account_number},
+        "amount": abs(amount),
+        "description": description,
+    }
+    if dimension_value_id is not None:
+        debit_line["dimensions"] = [{"id": dimension_value_id}]
+
+    credit_line: Dict[str, Any] = {
+        "account": {"number": "2400"},
+        "amount": -abs(amount),
+        "description": description,
+    }
+    payload = {
+        "date": fields.get("date") or _today_iso(),
+        "description": description,
+        "voucherLines": [debit_line, credit_line],
     }
     return _compact_payload(payload)
 
@@ -419,6 +456,118 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         invoice_payload = _build_invoice_payload(fields, customer_id, order_id)
         response = client.create_resource("invoice", invoice_payload)
         operations.append(OperationResult(name="create-invoice", resource_id=_extract_id(response), payload=response))
+
+    elif task_type == TaskType.CREATE_CREDIT_NOTE:
+        customer_spec = related.get("customer", {})
+        product_spec = dict(related.get("product", {}))
+        invoice_spec = dict(related.get("invoice", {}))
+        order_spec = dict(related.get("order", {}))
+        if invoice_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = invoice_spec["description"]
+        if order_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = order_spec["description"]
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=_can_create_customer_prerequisite(customer_spec),
+        )
+        if customer_id is None:
+            raise TripletexClientError("Credit note requires resolvable customer")
+        order_id = _create_order(client, customer_id, None, fields, product_spec, operations)
+        response = client.create_resource("invoice", _build_invoice_payload(fields, customer_id, order_id))
+        operations.append(OperationResult(name="create-credit-note", resource_id=_extract_id(response), payload=response))
+
+    elif task_type == TaskType.CREATE_PROJECT_BILLING:
+        payload = _build_project_payload(fields)
+        customer_spec = related.get("customer", {})
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=_can_create_customer_prerequisite(customer_spec),
+        )
+        if customer_id is None:
+            raise TripletexClientError("Project billing requires resolvable customer")
+        payload["customer"] = {"id": customer_id}
+        manager_spec = related.get("project_manager") or related.get("employee") or {}
+        manager_id = _resolve_project_manager(client, manager_spec, operations) if manager_spec else None
+        if manager_id is not None:
+            payload["projectManager"] = {"id": manager_id}
+        try:
+            project_response = client.create_resource("project", _compact_payload(payload))
+        except TripletexClientError as exc:
+            if "prosjektleder" not in str(exc).lower():
+                raise
+            fallback_manager_id = _resolve_fallback_project_manager(client, operations)
+            if fallback_manager_id is None:
+                raise
+            payload["projectManager"] = {"id": fallback_manager_id}
+            project_response = client.create_resource("project", _compact_payload(payload))
+        project_id = _extract_id(project_response)
+        operations.append(OperationResult(name="create-billing-project", resource_id=project_id, payload=project_response))
+        order_description = related.get("order", {}).get("description") or "Project partial billing"
+        order_id = _create_order(
+            client,
+            customer_id,
+            None,
+            fields,
+            {"description": order_description},
+            operations,
+        )
+        invoice_response = client.create_resource("invoice", _build_invoice_payload(fields, customer_id, order_id))
+        operations.append(
+            OperationResult(name="create-billing-invoice", resource_id=_extract_id(invoice_response), payload=invoice_response)
+        )
+
+    elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
+        dimension_response = client.create_resource("dimension", _build_dimension_payload(fields))
+        dimension_id = _extract_id(dimension_response)
+        operations.append(OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response))
+        selected_value_id = None
+        value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
+        selected_value_name = str(fields.get("selectedDimensionValue") or "")
+        for value_name in value_names:
+            value_response = client.create_resource("dimension/value", _build_dimension_value_payload(int(dimension_id), value_name))
+            value_id = _extract_id(value_response)
+            operations.append(OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response))
+            if value_name == selected_value_name:
+                selected_value_id = value_id
+        voucher_payload = _build_voucher_payload(
+            fields,
+            description="Dimension voucher {0}".format(fields.get("dimensionName")),
+            account_number=str(fields.get("accountNumber")),
+            amount=float(fields.get("amount", 0)),
+            dimension_value_id=selected_value_id,
+        )
+        voucher_response = client.create_resource("ledger/voucher", voucher_payload)
+        operations.append(
+            OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+        )
+
+    elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
+        employee_spec = related.get("employee", {})
+        employee_id = _resolve_employee(
+            client,
+            employee_spec,
+            operations,
+            allow_create=False,
+        ) if employee_spec else None
+        description = "Payroll expense"
+        if employee_spec.get("email"):
+            description = "Payroll expense {0}".format(employee_spec["email"])
+        voucher_payload = _build_voucher_payload(
+            fields,
+            description=description,
+            account_number="5000",
+            amount=float(fields.get("amount", 0)),
+        )
+        if employee_id is not None:
+            voucher_payload["employee"] = {"id": employee_id}
+        voucher_response = client.create_resource("ledger/voucher", voucher_payload)
+        operations.append(
+            OperationResult(name="create-payroll-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+        )
 
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         payload = dict(fields)

@@ -189,6 +189,17 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.SEARCH_CUSTOMERS: {"fields", "count"},
         TaskType.CREATE_PRODUCT: {"name", "priceExcludingVatCurrency", "productNumber", "vatPercentage"},
         TaskType.CREATE_PROJECT: {"name", "startDate"},
+        TaskType.CREATE_PROJECT_BILLING: {
+            "name",
+            "startDate",
+            "invoiceDate",
+            "invoiceDueDate",
+            "orderDate",
+            "deliveryDate",
+            "fixedPriceAmountCurrency",
+            "billingPercentage",
+            "amount",
+        },
         TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber", "departmentNames"},
         TaskType.CREATE_ORDER: {"orderDate", "deliveryDate"},
         TaskType.CREATE_INVOICE: {
@@ -201,6 +212,29 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "markAsPaid",
             "paymentDate",
             "amountPaidCurrency",
+        },
+        TaskType.CREATE_CREDIT_NOTE: {
+            "invoiceDate",
+            "invoiceDueDate",
+            "orderDate",
+            "deliveryDate",
+            "amount",
+            "creditNote",
+        },
+        TaskType.CREATE_DIMENSION_VOUCHER: {
+            "date",
+            "dimensionName",
+            "dimensionValues",
+            "selectedDimensionValue",
+            "accountNumber",
+            "amount",
+        },
+        TaskType.CREATE_PAYROLL_VOUCHER: {
+            "date",
+            "amount",
+            "baseSalaryCurrency",
+            "bonusCurrency",
+            "email",
         },
         TaskType.CREATE_TRAVEL_EXPENSE: {"date", "amount", "distance"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
@@ -249,11 +283,29 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         if "customer" not in normalized.related_entities:
             warnings.append("Project creation has no linked customer; this is risky")
 
+    if normalized.task_type == TaskType.CREATE_PROJECT_BILLING:
+        if not normalized.fields.get("name"):
+            return ValidationResult(normalized, blocking_error="Project billing requires project name")
+        if "customer" not in normalized.related_entities:
+            return ValidationResult(normalized, blocking_error="Project billing requires customer reference")
+        if normalized.fields.get("amount") is None:
+            return ValidationResult(normalized, blocking_error="Project billing requires billable amount")
+        normalized.related_entities.setdefault("order", {})
+        normalized.related_entities.setdefault("invoice", {})
+        normalized.related_entities["order"].setdefault(
+            "description",
+            normalized.related_entities["invoice"].get("description") or "Project partial billing",
+        )
+        normalized.related_entities["invoice"].setdefault(
+            "description",
+            normalized.related_entities["order"]["description"],
+        )
+
     if normalized.task_type == TaskType.CREATE_DEPARTMENT:
         if not normalized.fields.get("name") and not normalized.fields.get("departmentNames"):
             return ValidationResult(normalized, blocking_error="Department creation requires department name")
 
-    if normalized.task_type in {TaskType.CREATE_ORDER, TaskType.CREATE_INVOICE}:
+    if normalized.task_type in {TaskType.CREATE_ORDER, TaskType.CREATE_INVOICE, TaskType.CREATE_CREDIT_NOTE}:
         if "customer" not in normalized.related_entities:
             return ValidationResult(normalized, blocking_error="Order/invoice creation requires customer reference")
         if not _has_order_line_source(normalized):
@@ -268,6 +320,30 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         normalized.fields.setdefault("paymentDate", normalized.fields.get("invoiceDate"))
         if normalized.fields.get("amountPaidCurrency") is None and normalized.fields.get("amount") is not None:
             normalized.fields["amountPaidCurrency"] = normalized.fields["amount"]
+
+    if normalized.task_type == TaskType.CREATE_CREDIT_NOTE:
+        normalized.fields["creditNote"] = True
+        if normalized.fields.get("amount") is not None:
+            normalized.fields["amount"] = -abs(float(normalized.fields["amount"]))
+
+    if normalized.task_type == TaskType.CREATE_DIMENSION_VOUCHER:
+        if not normalized.fields.get("dimensionName"):
+            return ValidationResult(normalized, blocking_error="Dimension voucher requires dimension name")
+        if not normalized.fields.get("dimensionValues"):
+            return ValidationResult(normalized, blocking_error="Dimension voucher requires dimension values")
+        if not normalized.fields.get("selectedDimensionValue"):
+            first_value = str(normalized.fields["dimensionValues"]).split("||")[0]
+            normalized.fields["selectedDimensionValue"] = first_value
+        if normalized.fields.get("accountNumber") is None:
+            return ValidationResult(normalized, blocking_error="Dimension voucher requires account number")
+        if normalized.fields.get("amount") is None:
+            return ValidationResult(normalized, blocking_error="Dimension voucher requires amount")
+
+    if normalized.task_type == TaskType.CREATE_PAYROLL_VOUCHER:
+        if normalized.fields.get("amount") is None:
+            return ValidationResult(normalized, blocking_error="Payroll voucher requires salary amount")
+        if "employee" not in normalized.related_entities and normalized.fields.get("email"):
+            normalized.related_entities["employee"] = {"email": normalized.fields["email"]}
 
     if normalized.task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         warnings.append("Travel expense flow is still high risk and only lightly validated")

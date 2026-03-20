@@ -55,6 +55,34 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
                 PlannedStep(name="create-invoice", resource="invoice", action="create"),
             ]
         )
+    elif task_type == TaskType.CREATE_CREDIT_NOTE:
+        steps.extend(
+            [
+                PlannedStep(name="resolve-credit-customer", resource="customer", action="resolve"),
+                PlannedStep(name="create-credit-order", resource="order", action="create"),
+                PlannedStep(name="create-credit-note", resource="invoice", action="create"),
+            ]
+        )
+    elif task_type == TaskType.CREATE_PROJECT_BILLING:
+        steps.extend(
+            [
+                PlannedStep(name="resolve-billing-customer", resource="customer", action="resolve"),
+                PlannedStep(name="resolve-billing-project-manager", resource="employee", action="resolve"),
+                PlannedStep(name="create-billing-project", resource="project", action="create"),
+                PlannedStep(name="create-billing-order", resource="order", action="create"),
+                PlannedStep(name="create-billing-invoice", resource="invoice", action="create"),
+            ]
+        )
+    elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
+        steps.extend(
+            [
+                PlannedStep(name="create-dimension", resource="dimension", action="create"),
+                PlannedStep(name="create-dimension-values", resource="dimension/value", action="create"),
+                PlannedStep(name="create-dimension-voucher", resource="ledger/voucher", action="create"),
+            ]
+        )
+    elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
+        steps.append(PlannedStep(name="create-payroll-voucher", resource="ledger/voucher", action="create"))
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
         steps.append(PlannedStep(name="create-travel-expense", resource="travelExpense", action="create"))
     elif task_type == TaskType.DELETE_TRAVEL_EXPENSE:
