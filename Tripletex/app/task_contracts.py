@@ -54,6 +54,17 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
             TripletexErrorCategory.VALIDATION_ENVIRONMENT,
         ],
     ),
+    TaskType.CREATE_SUPPLIER_INVOICE: TaskContract(
+        task_type=TaskType.CREATE_SUPPLIER_INVOICE,
+        allowed_endpoints=["/supplier", "/supplierInvoice"],
+        prerequisites=["supplier", "amount", "supplier invoice number"],
+        recoverable_errors=[TripletexErrorCategory.NO_RESULTS, TripletexErrorCategory.VALIDATION_MISSING_FIELDS],
+        terminal_errors=[
+            TripletexErrorCategory.UNAUTHORIZED,
+            TripletexErrorCategory.WRONG_ENDPOINT,
+            TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+        ],
+    ),
     TaskType.CREATE_CREDIT_NOTE: TaskContract(
         task_type=TaskType.CREATE_CREDIT_NOTE,
         allowed_endpoints=["/customer", "/order", "/invoice"],
@@ -71,6 +82,13 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
             TripletexErrorCategory.WRONG_ENDPOINT,
             TripletexErrorCategory.VALIDATION_ENVIRONMENT,
         ],
+    ),
+    TaskType.CREATE_DIMENSION_VOUCHER: TaskContract(
+        task_type=TaskType.CREATE_DIMENSION_VOUCHER,
+        allowed_endpoints=["/ledger/accountingDimensionName", "/ledger/accountingDimensionValue", "/ledger/voucher"],
+        prerequisites=["dimension name", "dimension value", "account number", "amount"],
+        recoverable_errors=[TripletexErrorCategory.NO_RESULTS, TripletexErrorCategory.VALIDATION_MISSING_FIELDS],
+        terminal_errors=[TripletexErrorCategory.UNAUTHORIZED, TripletexErrorCategory.WRONG_ENDPOINT],
     ),
     TaskType.CREATE_TRAVEL_EXPENSE: TaskContract(
         task_type=TaskType.CREATE_TRAVEL_EXPENSE,

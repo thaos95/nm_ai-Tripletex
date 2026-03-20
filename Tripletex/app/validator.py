@@ -231,6 +231,13 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "paymentDate",
             "amountPaidCurrency",
         },
+        TaskType.CREATE_SUPPLIER_INVOICE: {
+            "invoiceDate",
+            "invoiceNumber",
+            "amount",
+            "accountNumber",
+            "vatPercentage",
+        },
         TaskType.CREATE_CREDIT_NOTE: {
             "invoiceDate",
             "invoiceDueDate",
@@ -341,6 +348,14 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         normalized.fields.setdefault("paymentDate", normalized.fields.get("invoiceDate"))
         if normalized.fields.get("amountPaidCurrency") is None and normalized.fields.get("amount") is not None:
             normalized.fields["amountPaidCurrency"] = normalized.fields["amount"]
+
+    if normalized.task_type == TaskType.CREATE_SUPPLIER_INVOICE:
+        if "supplier" not in normalized.related_entities:
+            return ValidationResult(normalized, blocking_error="Supplier invoice requires supplier reference")
+        if not normalized.fields.get("invoiceNumber"):
+            return ValidationResult(normalized, blocking_error="Supplier invoice requires supplier invoice number")
+        if normalized.fields.get("amount") is None:
+            return ValidationResult(normalized, blocking_error="Supplier invoice requires amount")
 
     if normalized.task_type == TaskType.CREATE_CREDIT_NOTE:
         normalized.fields["creditNote"] = True

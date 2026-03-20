@@ -62,7 +62,7 @@ def classify_tripletex_error(raw_message: str) -> ClassifiedTripletexError:
             return ClassifiedTripletexError(
                 category=TripletexErrorCategory.VALIDATION_ENVIRONMENT,
                 recoverable=False,
-                summary="Tripletex company configuration blocks this workflow.",
+                summary="COMPANY_BANK_ACCOUNT_MISSING: Selskapet mangler bankkonto, og dette kan ikke loses via tilgjengelige API-endepunkter.",
                 raw_message=raw_message,
             )
         if "required" in message or "mangler" in message or "missing" in message:

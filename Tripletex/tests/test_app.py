@@ -394,8 +394,8 @@ def test_solve_create_travel_expense() -> None:
         },
     )
 
-    assert response.status_code == 502
-    assert response.json()["detail"] == "Unsupported task"
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
     app.dependency_overrides.clear()
 
 
@@ -800,32 +800,6 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     app.dependency_overrides.clear()
 
 
-def test_solve_create_travel_expense_is_rejected_as_unsupported() -> None:
-    recorded = {}
-
-    def transport() -> httpx.MockTransport:
-        def handler(request: httpx.Request) -> httpx.Response:
-            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
-            return httpx.Response(404, json={"error": {"message": "not found"}})
-
-        return httpx.MockTransport(handler)
-
-    app.dependency_overrides[get_client_transport] = transport
-    client = TestClient(app)
-    response = client.post(
-        "/solve",
-        json={
-            "prompt": 'Register a travel expense for William Wilson (william.wilson@example.org) for "Client visit Trondheim". The trip lasted 2 days with per diem (daily rate 800 NOK). Expenses: flight ticket 7600 NOK and taxi 700 NOK.',
-            "files": [],
-            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
-        },
-    )
-    assert response.status_code == 502
-    assert response.json()["detail"] == "Unsupported task"
-    assert recorded.get("calls") is None
-    app.dependency_overrides.clear()
-
-
 def test_solve_nynorsk_invoice_uses_description_without_quotes() -> None:
     recorded = {}
     app.dependency_overrides[get_client_transport] = lambda: recording_transport(recorded)
@@ -990,12 +964,20 @@ def test_validate_reports_customer_not_found_before_invoice_creation() -> None:
     app.dependency_overrides.clear()
 
 
-def test_solve_supplier_invoice_prompt_is_rejected_as_unsupported() -> None:
+def test_solve_supplier_invoice_prompt_uses_supplier_endpoints() -> None:
     recorded = {}
 
     def transport() -> httpx.MockTransport:
         def handler(request: httpx.Request) -> httpx.Response:
             recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+            if request.method == "GET" and request.url.path == "/v2/supplier":
+                return httpx.Response(200, json={"values": []})
+            if request.method == "POST" and request.url.path == "/v2/supplier":
+                recorded["supplier_payload"] = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(200, json={"value": {"id": 7001}})
+            if request.method == "POST" and request.url.path == "/v2/supplierInvoice":
+                recorded["supplier_invoice_payload"] = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(200, json={"value": {"id": 8001}})
             return httpx.Response(404, json={"error": {"message": "not found"}})
 
         return httpx.MockTransport(handler)
@@ -1010,9 +992,15 @@ def test_solve_supplier_invoice_prompt_is_rejected_as_unsupported() -> None:
             "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
         },
     )
-    assert response.status_code == 502
-    assert response.json()["detail"] == "Unsupported task"
-    assert recorded.get("calls") is None
+    assert response.status_code == 200
+    assert recorded["calls"] == [
+        "GET /v2/supplier",
+        "POST /v2/supplier",
+        "POST /v2/supplierInvoice",
+    ]
+    assert recorded["supplier_payload"]["organizationNumber"] == "967247049"
+    assert recorded["supplier_invoice_payload"]["supplier"]["id"] == 7001
+    assert recorded["supplier_invoice_payload"]["invoiceNumber"] == "INV-2026-9601"
     app.dependency_overrides.clear()
 
 
@@ -1039,6 +1027,83 @@ def test_validate_reports_ledger_account_missing_when_not_confirmed() -> None:
     body = response.json()
     assert any(check["code"] == "LEDGER_ACCOUNT_MISSING" for check in body["checks"])
     assert body["can_continue"] is False
+    app.dependency_overrides.clear()
+
+
+def test_solve_maps_company_bank_account_error_precisely() -> None:
+    recorded = {}
+
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+            if request.method == "GET" and request.url.path == "/v2/customer":
+                return httpx.Response(200, json={"values": [{"id": 2001, "name": "Etoile SARL", "organizationNumber": "995085488"}]})
+            if request.method == "POST" and request.url.path == "/v2/order":
+                return httpx.Response(200, json={"value": {"id": 5001}})
+            if request.method == "POST" and request.url.path == "/v2/invoice":
+                return httpx.Response(
+                    422,
+                    json={
+                        "status": 422,
+                        "developerMessage": "VALIDATION_ERROR",
+                        "validationMessages": [
+                            {"field": None, "message": "Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer."}
+                        ],
+                    },
+                )
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": "Créez et envoyez une facture au client Étoile SARL (nº org. 995085488) de 7250 NOK hors TVA. La facture concerne Rapport d'analyse.",
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 502
+    assert "company_bank_account_missing" in response.json()["detail"].lower()
+    assert recorded["calls"] == ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"]
+    app.dependency_overrides.clear()
+
+
+def test_solve_dimension_voucher_uses_stable_ledger_dimension_endpoints() -> None:
+    recorded = {}
+
+    def transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded.setdefault("calls", []).append(f"{request.method} {request.url.path}")
+            if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionName":
+                return httpx.Response(200, json={"value": {"id": 8101}})
+            if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionValue":
+                return httpx.Response(200, json={"value": {"id": 8102}})
+            if request.method == "POST" and request.url.path == "/v2/ledger/voucher":
+                return httpx.Response(200, json={"value": {"id": 8103}})
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+
+        return httpx.MockTransport(handler)
+
+    app.dependency_overrides[get_client_transport] = transport
+    client = TestClient(app)
+    response = client.post(
+        "/solve",
+        json={
+            "prompt": 'Crie uma dimensao contabilistica personalizada "Marked" com os valores "Bedrift" e "Privat". Em seguida, lance um documento na conta 6590 por 16750 NOK, vinculado ao valor de dimensao "Bedrift".',
+            "files": [],
+            "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
+        },
+    )
+    assert response.status_code == 200
+    assert recorded["calls"] == [
+        "POST /v2/ledger/accountingDimensionName",
+        "POST /v2/ledger/accountingDimensionValue",
+        "POST /v2/ledger/accountingDimensionValue",
+        "POST /v2/ledger/voucher",
+    ]
     app.dependency_overrides.clear()
 
 

@@ -9,8 +9,8 @@ def test_parse_travel_expense_with_per_diem_and_expenses_aggregates_amount() -> 
     )
     validated = validate_and_normalize_task(parsed)
 
-    assert validated.parsed_task.task_type == TaskType.UNSUPPORTED
-    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in validated.parsed_task.notes[0]
+    assert validated.parsed_task.task_type == TaskType.CREATE_TRAVEL_EXPENSE
+    assert validated.blocking_error is None
     assert validated.parsed_task.fields["amount"] == 7050.0
 
 

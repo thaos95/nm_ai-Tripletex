@@ -72,7 +72,20 @@ def _build_customer_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
     return _compact_payload(payload)
 
 
+def _build_supplier_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "name": spec.get("name"),
+        "email": spec.get("email"),
+        "organizationNumber": spec.get("organizationNumber"),
+    }
+    return _compact_payload(payload)
+
+
 def _can_create_customer_prerequisite(spec: Dict[str, Any]) -> bool:
+    return bool(spec.get("name") and (spec.get("organizationNumber") or spec.get("email")))
+
+
+def _can_create_supplier_prerequisite(spec: Dict[str, Any]) -> bool:
     return bool(spec.get("name") and (spec.get("organizationNumber") or spec.get("email")))
 
 
@@ -113,6 +126,18 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
     return _compact_payload(payload)
 
 
+def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) -> Dict[str, Any]:
+    payload = {
+        "invoiceDate": fields.get("invoiceDate"),
+        "invoiceNumber": fields.get("invoiceNumber"),
+        "supplier": {"id": supplier_id},
+        "amount": fields.get("amount"),
+        "account": {"number": str(fields.get("accountNumber"))} if fields.get("accountNumber") is not None else None,
+        "vatPercentage": fields.get("vatPercentage"),
+    }
+    return _compact_payload(payload)
+
+
 def _build_minimal_invoice_payload(
     fields: Dict[str, Any],
     customer_id: int,
@@ -145,7 +170,7 @@ def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_dimension_value_payload(dimension_id: int, value_name: str) -> Dict[str, Any]:
-    return _compact_payload({"dimension": {"id": dimension_id}, "name": value_name})
+    return _compact_payload({"accountingDimensionName": {"id": dimension_id}, "name": value_name})
 
 
 def _build_voucher_payload(
@@ -247,6 +272,40 @@ def _resolve_employee(
     employee_id = _extract_id(response)
     operations.append(OperationResult(name="create-employee", resource_id=employee_id, payload=response))
     return employee_id
+
+
+def _resolve_supplier(
+    client: TripletexClient,
+    spec: Dict[str, Any],
+    operations: list,
+    allow_create: bool = True,
+) -> Optional[int]:
+    if spec.get("id") is not None:
+        supplier_id = int(spec["id"])
+        operations.append(OperationResult(name="reuse-supplier", resource_id=supplier_id, payload={"id": supplier_id}))
+        return supplier_id
+
+    match_fields = {}
+    if spec.get("organizationNumber"):
+        match_fields["organizationNumber"] = spec["organizationNumber"]
+    elif spec.get("email"):
+        match_fields["email"] = spec["email"]
+    elif spec.get("name"):
+        match_fields["name"] = spec["name"]
+
+    existing = client.find_single("supplier", match_fields) if match_fields else None
+    if existing:
+        supplier_id = existing["id"]
+        operations.append(OperationResult(name="resolve-supplier", resource_id=supplier_id, payload=existing))
+        return supplier_id
+
+    if not allow_create:
+        return None
+
+    response = client.create_resource("supplier", _build_supplier_payload(spec))
+    supplier_id = _extract_id(response)
+    operations.append(OperationResult(name="create-supplier", resource_id=supplier_id, payload=response))
+    return supplier_id
 
 
 def _resolve_fallback_project_manager(client: TripletexClient, operations: list) -> Optional[int]:
@@ -665,6 +724,21 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             operation_name="create-invoice",
         )
 
+    elif task_type == TaskType.CREATE_SUPPLIER_INVOICE:
+        supplier_spec = related.get("supplier", {})
+        supplier_id = _resolve_supplier(
+            client,
+            supplier_spec,
+            operations,
+            allow_create=_can_create_supplier_prerequisite(supplier_spec),
+        )
+        if supplier_id is None:
+            raise TripletexClientError("Supplier invoice requires resolvable supplier")
+        response = client.create_resource("supplierInvoice", _build_supplier_invoice_payload(fields, supplier_id))
+        operations.append(
+            OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
+        )
+
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
         product_spec = dict(related.get("product", {}))
@@ -744,36 +818,22 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         selected_value_id = None
         value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
         selected_value_name = str(fields.get("selectedDimensionValue") or "")
-        try:
-            dimension_response = client.create_resource("dimension", _build_dimension_payload(fields))
-            dimension_id = _extract_id(dimension_response)
-            operations.append(
-                OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
+        dimension_response = client.create_resource("ledger/accountingDimensionName", _build_dimension_payload(fields))
+        dimension_id = _extract_id(dimension_response)
+        operations.append(
+            OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
+        )
+        for value_name in value_names:
+            value_response = client.create_resource(
+                "ledger/accountingDimensionValue",
+                _build_dimension_value_payload(int(dimension_id), value_name),
             )
-            for value_name in value_names:
-                value_response = client.create_resource(
-                    "dimension/value",
-                    _build_dimension_value_payload(int(dimension_id), value_name),
-                )
-                value_id = _extract_id(value_response)
-                operations.append(
-                    OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
-                )
-                if value_name == selected_value_name:
-                    selected_value_id = value_id
-        except TripletexClientError as exc:
-            classified = classify_tripletex_error(str(exc))
-            if classified.category != TripletexErrorCategory.WRONG_ENDPOINT:
-                raise
+            value_id = _extract_id(value_response)
             operations.append(
-                OperationResult(
-                    name="skip-dimension-setup",
-                    payload={
-                        "reason": "dimension-endpoint-unavailable",
-                        "selectedDimensionValue": selected_value_name,
-                    },
-                )
+                OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
             )
+            if value_name == selected_value_name:
+                selected_value_id = value_id
         voucher_payload = _build_voucher_payload(
             fields,
             description="Dimension voucher {0}".format(fields.get("dimensionName")),

@@ -180,6 +180,12 @@ def _seed_context_from_task(context: WorkflowContext, task: ParsedTask) -> None:
 
 def parse_workflow(prompt: str) -> Tuple[List[ParsedTask], List[str]]:
     whole_task = parse_prompt(prompt)
+    if whole_task.task_type in {
+        TaskType.CREATE_SUPPLIER_INVOICE,
+        TaskType.CREATE_PROJECT_BILLING,
+        TaskType.CREATE_CREDIT_NOTE,
+    }:
+        return [whole_task], []
     segments = _split_prompt(prompt)
     if len(segments) < 2:
         return [whole_task], []

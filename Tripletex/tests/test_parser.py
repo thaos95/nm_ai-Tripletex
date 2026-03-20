@@ -124,27 +124,31 @@ def test_parse_supplier_invoice_prompt_is_unsupported() -> None:
     parsed = parse_prompt(
         "We have received invoice INV-2026-9601 from the supplier Oakwood Ltd (org no. 967247049) for 79750 NOK including VAT. The amount relates to office services (account 6540). Register the supplier invoice with the correct input VAT (25%)."
     )
-    assert parsed.task_type == TaskType.UNSUPPORTED
-    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in parsed.notes[0]
+    assert parsed.task_type == TaskType.CREATE_SUPPLIER_INVOICE
+    assert parsed.related_entities["supplier"]["organizationNumber"] == "967247049"
+    assert parsed.fields["invoiceNumber"] == "INV-2026-9601"
+    assert parsed.fields["amount"] == 79750.0
+    assert parsed.fields["accountNumber"] == "6540"
+    assert parsed.fields["vatPercentage"] == 25.0
 
 
 def test_parse_german_supplier_invoice_prompt_is_unsupported() -> None:
     parsed = parse_prompt(
         "Wir haben die Rechnung INV-2026-8810 vom Lieferanten Sonnental GmbH (Org.-Nr. 988926221) über 8050 NOK einschließlich MwSt. erhalten. Der Betrag betrifft Bürodienstleistungen (Konto 6860). Erfassen Sie die Lieferantenrechnung mit der korrekten Vorsteuer (25 %)."
     )
-    assert parsed.task_type == TaskType.UNSUPPORTED
-    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in parsed.notes[0]
+    assert parsed.task_type == TaskType.CREATE_SUPPLIER_INVOICE
+    assert parsed.related_entities["supplier"]["organizationNumber"] == "988926221"
 
 
-def test_parse_unsupported_fast_path_skips_llm(monkeypatch) -> None:
+def test_parse_supplier_invoice_fast_path_skips_llm(monkeypatch) -> None:
     def fail_llm(prompt: str) -> ParsedTask:
-        raise AssertionError("LLM should not be called for high-confidence unsupported prompts")
+        raise AssertionError("LLM should not be called for high-confidence supplier invoice prompts")
 
     monkeypatch.setattr(parser_module, "parse_prompt_with_llm", fail_llm)
     parsed = parse_prompt(
         "We have received invoice INV-2026-9601 from the supplier Oakwood Ltd (org no. 967247049) for 79750 NOK including VAT. The amount relates to office services (account 6540). Register the supplier invoice with the correct input VAT (25%)."
     )
-    assert parsed.task_type == TaskType.UNSUPPORTED
+    assert parsed.task_type == TaskType.CREATE_SUPPLIER_INVOICE
 
 
 def test_parse_employee_with_birth_and_start_dates() -> None:

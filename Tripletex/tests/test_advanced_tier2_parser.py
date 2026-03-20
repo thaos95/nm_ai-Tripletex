@@ -32,13 +32,12 @@ def test_parse_dimension_voucher_prompt() -> None:
         'Crie uma dimensao contabilistica personalizada "Marked" com os valores "Bedrift" e "Privat". Em seguida, lance um documento na conta 6590 por 16750 NOK, vinculado ao valor de dimensao "Bedrift".'
     )
     validated = validate_and_normalize_task(parsed)
-    assert validated.parsed_task.task_type == TaskType.UNSUPPORTED
+    assert validated.parsed_task.task_type == TaskType.CREATE_DIMENSION_VOUCHER
     assert validated.parsed_task.fields["dimensionName"] == "Marked"
     assert validated.parsed_task.fields["dimensionValues"] == "Bedrift||Privat"
     assert validated.parsed_task.fields["selectedDimensionValue"] == "Bedrift"
     assert validated.parsed_task.fields["accountNumber"] == "6590"
     assert validated.parsed_task.fields["amount"] == 16750.0
-    assert "NOT_SUPPORTED_VIA_AVAILABLE_API" in validated.parsed_task.notes[0]
 
 
 def test_parse_payroll_voucher_prompt() -> None:

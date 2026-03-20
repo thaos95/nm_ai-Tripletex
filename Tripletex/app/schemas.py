@@ -21,6 +21,7 @@ class TaskType(str, Enum):
     CREATE_DEPARTMENT = "create_department"
     CREATE_ORDER = "create_order"
     CREATE_INVOICE = "create_invoice"
+    CREATE_SUPPLIER_INVOICE = "create_supplier_invoice"
     CREATE_CREDIT_NOTE = "create_credit_note"
     CREATE_PROJECT_BILLING = "create_project_billing"
     CREATE_DIMENSION_VOUCHER = "create_dimension_voucher"

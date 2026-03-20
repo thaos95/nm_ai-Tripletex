@@ -70,6 +70,13 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
                 PlannedStep(name="create-invoice", resource="invoice", action="create"),
             ]
         )
+    elif task_type == TaskType.CREATE_SUPPLIER_INVOICE:
+        steps.extend(
+            [
+                PlannedStep(name="resolve-supplier", resource="supplier", action="resolve"),
+                PlannedStep(name="create-supplier-invoice", resource="supplierInvoice", action="create"),
+            ]
+        )
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         steps.extend(
             [
@@ -91,8 +98,8 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
     elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
         steps.extend(
             [
-                PlannedStep(name="create-dimension", resource="dimension", action="create"),
-                PlannedStep(name="create-dimension-values", resource="dimension/value", action="create"),
+                PlannedStep(name="create-dimension", resource="ledger/accountingDimensionName", action="create"),
+                PlannedStep(name="create-dimension-values", resource="ledger/accountingDimensionValue", action="create"),
                 PlannedStep(name="create-dimension-voucher", resource="ledger/voucher", action="create"),
             ]
         )

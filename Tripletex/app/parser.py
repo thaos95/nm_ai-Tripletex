@@ -487,6 +487,28 @@ def _extract_invoice_entities(prompt: str) -> Dict[str, Dict[str, object]]:
     return related_entities
 
 
+def _extract_supplier_name(prompt: str) -> Optional[str]:
+    patterns = [
+        r"(?:supplier|vendor|leverand[^\s]*|fornecedor|fournisseur|lieferanten?)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
+        r"(?:from|vom)\s+(?:the\s+)?(?:supplier|vendor|leverand[^\s]*|fornecedor|fournisseur|lieferanten?)\s+([A-ZÆØÅÉÜÖÄ][^,(.\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, prompt, re.IGNORECASE)
+        if match:
+            return _clean_name(match.group(1))
+    return None
+
+
+def _extract_supplier_invoice_number(prompt: str) -> Optional[str]:
+    match = re.search(r"\bINV-[A-Z0-9-]+\b", prompt, re.IGNORECASE)
+    if match:
+        return match.group(0).strip()
+    match = re.search(r"\b(?:invoice|faktura|rechnung)[- ]+[A-Z0-9-]+\b", prompt, re.IGNORECASE)
+    if match:
+        return match.group(0).strip()
+    return None
+
+
 def _extract_org_number(prompt: str) -> Optional[str]:
     match = re.search(
         r"(?:organization number|organisasjonsnummer|org(?:anization)?\.?\s*(?:no\.?|n\S?\.?)|org[\.\-\s]*nr\.?|numero de organizacao|numero de organizac?ao|numero d'organisation|numero dorganisation|num[eé]ro d'organisation|num[eé]ro dorganisation|n\S?\s*org\.?)\s*(\d{9})",
@@ -948,11 +970,31 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     payment_reversal_detected = _contains_payment_reversal_intent(lowered)
     invoice_context_detected = any(token in lowered for token in ["invoice", "facture", "faktura", "fatura", "rechnung"])
     if supplier_invoice_detected:
+        supplier_name = _extract_supplier_name(prompt)
+        if supplier_name:
+            related_entities["supplier"] = {"name": supplier_name}
+            org_number = _extract_org_number(prompt)
+            if org_number:
+                related_entities["supplier"]["organizationNumber"] = org_number
+        invoice_number = _extract_supplier_invoice_number(prompt)
+        if invoice_number:
+            fields["invoiceNumber"] = invoice_number
+        amount = _extract_amount(prompt)
+        if amount is not None:
+            fields["amount"] = amount
+        account_number = _extract_account_number(prompt)
+        if account_number:
+            fields["accountNumber"] = account_number
+        vat_match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", prompt)
+        if vat_match:
+            fields["vatPercentage"] = float(vat_match.group(1).replace(",", "."))
+        fields["invoiceDate"] = fields.get("date") or _today_iso()
         return ParsedTask(
-            task_type=TaskType.UNSUPPORTED,
+            task_type=TaskType.CREATE_SUPPLIER_INVOICE,
             confidence=0.95,
             language_hint=_language_hint(prompt),
-            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: supplier invoice workflows are not available via the configured endpoints"],
+            fields=fields,
+            related_entities=related_entities,
         )
     if supplier_detected:
         entity = "customer"
@@ -1388,12 +1430,15 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 amount += sum(remaining_expenses)
         if amount is not None:
             fields["amount"] = amount
+        if "date" in fields:
+            fields["expenseDate"] = fields.pop("date")
+        if "kilometer" in lowered or "km" in lowered:
+            fields["distance"] = int(amount) if amount is not None else 0
         return ParsedTask(
-            task_type=TaskType.UNSUPPORTED,
-            confidence=0.96,
+            task_type=TaskType.CREATE_TRAVEL_EXPENSE,
+            confidence=0.72,
             language_hint=_language_hint(prompt),
             fields=fields,
-            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: travel expense creation is not available in the competition-safe workflow"],
         )
 
     if entity == "voucher" and action == "delete":
@@ -1425,11 +1470,10 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         if amount is not None:
             fields["amount"] = amount
         return ParsedTask(
-            task_type=TaskType.UNSUPPORTED,
-            confidence=0.96,
+            task_type=TaskType.CREATE_DIMENSION_VOUCHER,
+            confidence=0.74,
             language_hint=_language_hint(prompt),
             fields=fields,
-            notes=["NOT_SUPPORTED_VIA_AVAILABLE_API: custom accounting dimension workflows are not available via the configured endpoints"],
         )
 
     if payroll_detected:
@@ -1575,6 +1619,8 @@ def parse_prompt(prompt: str) -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
     if rule_based.task_type == TaskType.UNSUPPORTED and rule_based.confidence >= 0.9:
+        return rule_based
+    if rule_based.task_type == TaskType.CREATE_SUPPLIER_INVOICE and rule_based.confidence >= 0.9:
         return rule_based
     if rule_based.task_type in {
         TaskType.CREATE_EMPLOYEE,

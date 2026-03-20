@@ -18,6 +18,7 @@ from app.schemas import ParsedTask, TaskType
         (TaskType.CREATE_DEPARTMENT, ["create-department"]),
         (TaskType.CREATE_ORDER, ["resolve-order-customer", "resolve-order-product", "create-order"]),
         (TaskType.CREATE_INVOICE, ["resolve-invoice-customer", "resolve-invoice-product", "create-order", "create-invoice"]),
+        (TaskType.CREATE_SUPPLIER_INVOICE, ["resolve-supplier", "create-supplier-invoice"]),
         (TaskType.CREATE_CREDIT_NOTE, ["resolve-credit-customer", "create-credit-order", "create-credit-note"]),
         (
             TaskType.CREATE_PROJECT_BILLING,
