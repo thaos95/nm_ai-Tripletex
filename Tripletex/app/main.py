@@ -2,11 +2,12 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.attachment_parser import parse_attachments
 from app.clients.tripletex import TripletexClient, TripletexClientError
+from app.config import settings
 from app.errors import MissingPrerequisiteError, UnsupportedTaskError
 from app.parser import parse_prompt
 from app.planner import build_plan
@@ -25,9 +26,22 @@ def get_client_transport() -> Optional[httpx.BaseTransport]:
     return None
 
 
+def _verify_api_key(authorization: Optional[str] = Header(default=None)) -> None:
+    """Verify Bearer token if TRIPLETEX_AGENT_API_KEY is configured."""
+    if not settings.api_key:
+        return
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    parts = authorization.split(" ", 1)
+    token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else authorization
+    if token != settings.api_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+
 @app.post("/solve", response_model=SolveResponse)
 async def solve(
     request: SolveRequest,
+    _auth: None = Depends(_verify_api_key),
     transport: Optional[httpx.BaseTransport] = Depends(get_client_transport),
 ) -> SolveResponse:
     LOGGER.info(
