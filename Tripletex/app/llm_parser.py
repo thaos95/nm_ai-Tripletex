@@ -177,16 +177,14 @@ def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
     if not settings.replicate_api_token:
         return None
 
-    messages = "{system}\n\nUser: {user}\nAssistant:".format(
-        system=SYSTEM_PROMPT,
-        user=prompt,
-    )
-
     payload = {
         "input": {
-            "prompt": messages,
-            "max_tokens": 2000,
+            "system_instruction": SYSTEM_PROMPT,
+            "prompt": prompt,
             "temperature": 0.1,
+            "top_p": 0.95,
+            "thinking_level": "low",
+            "max_output_tokens": 4096,
         },
     }
 
@@ -204,7 +202,7 @@ def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
             url,
             headers=headers,
             json=payload,
-            timeout=60.0,
+            timeout=90.0,
             trust_env=False,
         )
         if response.is_error:
