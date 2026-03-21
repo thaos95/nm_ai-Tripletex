@@ -10,6 +10,7 @@ class TripletexErrorCategory(str, Enum):
     WRONG_ENDPOINT = "wrong_endpoint"
     VALIDATION_MISSING_FIELDS = "validation_missing_fields"
     VALIDATION_ENVIRONMENT = "validation_environment"
+    VALIDATION_PREREQUISITE = "validation_prerequisite"
     VALIDATION_GENERIC = "validation_generic"
     NO_RESULTS = "no_results"
     NOT_FOUND = "not_found"
@@ -116,9 +117,9 @@ def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> Classif
     if status_code == 422 or "validation_error" in message or "validation" in message:
         if "bankkontonummer" in message or "bank account" in message or "bankkonto" in message or "module" in message:
             return ClassifiedTripletexError(
-                category=TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+                category=TripletexErrorCategory.VALIDATION_PREREQUISITE,
                 recoverable=False,
-                summary="COMPANY_BANK_ACCOUNT_MISSING: Selskapet mangler bankkonto, og dette kan ikke loses via tilgjengelige API-endepunkter.",
+                summary="COMPANY_BANK_ACCOUNT_MISSING: Selskapet mangler bankkonto. Opprett bankkonto i Tripletex før du prøver faktura igjen.",
                 raw_message=raw_message,
             )
         if "required" in message or "mangler" in message or "missing" in message:

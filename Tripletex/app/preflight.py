@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
-from app.error_handling import classify_tripletex_error
+from app.error_handling import TripletexErrorCategory, classify_tripletex_error
 from app.schemas import ParsedTask, TaskType, ValidateResponse, ValidationCheck
 
 
@@ -117,7 +117,17 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
                 can_continue = False
     except TripletexClientError as exc:
         classified = classify_tripletex_error(exc)
-        if classified.category.value == "validation_environment":
+        if classified.category == TripletexErrorCategory.VALIDATION_PREREQUISITE:
+            checks.append(
+                _fail(
+                    "company_bank_account",
+                    "COMPANY_BANK_ACCOUNT_MISSING",
+                    classified.summary,
+                    "POST /company/bankAccount",
+                    "/company/bankAccount",
+                )
+            )
+        elif classified.category == TripletexErrorCategory.VALIDATION_ENVIRONMENT:
             checks.append(
                 _fail(
                     "company_bank_account",
@@ -137,7 +147,7 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
     if any(check.code == "CUSTOMER_NOT_FOUND" for check in checks):
         summary = "Kunde mangler og ma opprettes for operasjonen kan fortsette."
     elif any(check.code == "COMPANY_BANK_ACCOUNT_MISSING" for check in checks):
-        summary = "Selskapet mangler bankkonto, og dette kan ikke loses via tilgjengelige API-endepunkter."
+        summary = "COMPANY_BANK_ACCOUNT_MISSING: Selskapet mangler bankkonto. Opprett bankkonto i Tripletex før du prøver faktura igjen."
     elif any(check.code == "EMPLOYMENT_MISSING_FOR_PERIOD" for check in checks):
         summary = "Lonn kan ikke kjares uten gyldig ansettelsesforhold."
     elif any(check.result == "UNKNOWN" for check in checks):

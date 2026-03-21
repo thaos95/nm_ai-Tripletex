@@ -1092,7 +1092,9 @@ def test_solve_maps_company_bank_account_error_precisely() -> None:
         },
     )
     assert response.status_code == 502
-    assert "company_bank_account_missing" in response.json()["detail"].lower()
+    detail = response.json()["detail"].lower()
+    assert "missing_prerequisite" in detail
+    assert "company_bank_account_missing" in detail
     assert recorded["calls"] == ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"]
     app.dependency_overrides.clear()
 

@@ -206,11 +206,11 @@ def solve(
                     [check.dict() for check in preflight_response.checks],
                 )
             elif not preflight_response.can_continue:
-                failure_type = "environment_blocked" if any(
-                    check.code in {"COMPANY_BANK_ACCOUNT_MISSING", "CUSTOMER_BANK_ACCOUNT_MISSING"} for check in preflight_response.checks
-                ) else "user_input_not_supported"
-                if failure_type == "environment_blocked":
-                    _record_environment_block(base_url, preflight_response.summary)
+                failure_type = (
+                    "missing_prerequisite"
+                    if any(check.code in {"COMPANY_BANK_ACCOUNT_MISSING", "CUSTOMER_BANK_ACCOUNT_MISSING"} for check in preflight_response.checks)
+                    else "user_input_not_supported"
+                )
                 logger.warning(
                     "solve_preflight_blocked task_type=%s failure_type=%s summary=%s checks=%r",
                     parsed_task.task_type,
@@ -251,7 +251,10 @@ def solve(
             return SolveResponse()
         if classified.category == TripletexErrorCategory.SERVER_ERROR:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=classified.summary)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=classified.summary)
+        detail = classified.summary
+        if classified.category == TripletexErrorCategory.VALIDATION_PREREQUISITE:
+            detail = f"missing_prerequisite: {detail}"
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
     finally:
         client.close()
 
