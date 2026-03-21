@@ -3,6 +3,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
+from app.config import settings
 from app.error_handling import (
     TripletexErrorCategory,
     classify_tripletex_error,
@@ -206,6 +207,42 @@ def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     return _compact_payload(payload)
 
 
+def _collect_bank_account_spec(fields: Dict[str, Any], related: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    spec = dict(related.get("companyBankAccount", {}))
+    spec.setdefault("bankAccountNumber", fields.get("companyBankAccountNumber"))
+    spec.setdefault("bankName", fields.get("companyBankAccountName"))
+    spec.setdefault("bankAccountType", fields.get("companyBankAccountType"))
+    if not spec.get("bankAccountNumber") and settings.default_bank_account_number:
+        spec["bankAccountNumber"] = settings.default_bank_account_number
+    if not spec.get("bankName") and settings.default_bank_account_name:
+        spec["bankName"] = settings.default_bank_account_name
+    if not spec.get("bankAccountType") and settings.default_bank_account_type:
+        spec["bankAccountType"] = settings.default_bank_account_type
+    return spec if spec.get("bankAccountNumber") else None
+
+
+def _ensure_company_bank_account(client: TripletexClient, spec: Dict[str, str], operations: list) -> None:
+    if not settings.enable_bank_account_creation:
+        return
+    payload = {
+        "bankAccountNumber": spec["bankAccountNumber"],
+        "bankName": spec.get("bankName"),
+        "bankAccountType": spec.get("bankAccountType"),
+    }
+    try:
+        response = client.create_resource("company/bankAccount", _compact_payload(payload))
+        operations.append(
+            OperationResult(
+                name="create-company-bank-account",
+                payload={"bankAccount": response},
+            )
+        )
+    except TripletexClientError as exc:
+        logger.warning(
+            "bank_account_creation_failed payload=%s error=%s",
+            json.dumps(payload, ensure_ascii=False, default=str),
+            str(exc),
+        )
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
     if fields.get("creditNote"):
         return False
@@ -543,11 +580,15 @@ def _create_invoice_with_fallback(
     customer_id: int,
     order_id: Optional[int],
     operations: list,
+    related: Dict[str, Any],
     *,
     task_type: TaskType,
     operation_name: str,
     minimal_first: bool = False,
 ) -> Dict[str, Any]:
+    bank_spec = _collect_bank_account_spec(fields, related)
+    if bank_spec:
+        _ensure_company_bank_account(client, bank_spec, operations)
     payload = (
         _build_minimal_invoice_payload(fields, customer_id, order_id)
         if minimal_first
@@ -1079,6 +1120,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id,
             order_id,
             operations,
+            related=related,
             task_type=task_type,
             operation_name="create-invoice",
         )
@@ -1175,6 +1217,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id,
             order_id,
             operations,
+            related=related,
             task_type=task_type,
             operation_name="create-billing-invoice",
         )
