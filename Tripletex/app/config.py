@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL")
+    enable_preflight: bool = Field(default=False, alias="TRIPLETEX_ENABLE_PREFLIGHT")
 
     model_config = SettingsConfigDict(
         env_file=".env",

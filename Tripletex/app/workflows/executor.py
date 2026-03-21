@@ -676,7 +676,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
     elif task_type == TaskType.UPDATE_EMPLOYEE:
         employee = client.find_single("employee", match_fields)
         if employee is None:
-            raise TripletexClientError("Could not uniquely resolve employee for update")
+            raise TripletexClientError(message="Could not uniquely resolve employee for update")
         employee_detail = client.find_by_id("employee", int(employee["id"])) or employee
         payload = dict(employee_detail)
         payload.update(_compact_payload(fields))
@@ -696,7 +696,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
     elif task_type == TaskType.UPDATE_CUSTOMER:
         customer = client.find_single("customer", match_fields)
         if customer is None:
-            raise TripletexClientError("Could not uniquely resolve customer for update")
+            raise TripletexClientError(message="Could not uniquely resolve customer for update")
         payload = dict(customer)
         payload.update(_compact_payload(fields))
         response = client.update_resource("customer", int(customer["id"]), payload)
@@ -782,7 +782,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             allow_create=_can_create_customer_prerequisite(customer_spec),
         )
         if customer_id is None:
-            raise TripletexClientError("Order requires resolvable customer")
+            raise TripletexClientError(message="Order requires resolvable customer")
         if not order_line_specs and product_spec.get("id") is not None:
             product_id = _resolve_product(client, product_spec, operations, allow_create=False)
         else:
@@ -821,7 +821,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             allow_create=_can_create_customer_prerequisite(customer_spec),
         )
         if customer_id is None:
-            raise TripletexClientError("Invoice requires resolvable customer")
+            raise TripletexClientError(message="Invoice requires resolvable customer")
         if not order_line_specs and product_spec.get("id") is not None:
             product_id = _resolve_product(client, product_spec, operations, allow_create=False)
         else:
@@ -871,7 +871,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             allow_create=_can_create_supplier_prerequisite(supplier_spec),
         )
         if supplier_id is None:
-            raise TripletexClientError("Supplier invoice requires resolvable supplier")
+            raise TripletexClientError(message="Supplier invoice requires resolvable supplier")
         response = client.create_resource("supplierInvoice", _build_supplier_invoice_payload(fields, supplier_id))
         operations.append(
             OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
@@ -886,10 +886,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             allow_create=_can_create_customer_prerequisite(customer_spec),
         )
         if customer_id is None:
-            raise TripletexClientError("Credit note requires resolvable customer")
+            raise TripletexClientError(message="Credit note requires resolvable customer")
         invoice_id = _resolve_credit_note_invoice(client, customer_id, fields, related, operations)
         if invoice_id is None:
-            raise TripletexClientError("Credit note requires resolvable invoice")
+            raise TripletexClientError(message="Credit note requires resolvable invoice")
         _create_credit_note(client, invoice_id, operations)
 
     elif task_type == TaskType.CREATE_PROJECT_BILLING:
@@ -902,7 +902,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             allow_create=_can_create_customer_prerequisite(customer_spec),
         )
         if customer_id is None:
-            raise TripletexClientError("Project billing requires resolvable customer")
+            raise TripletexClientError(message="Project billing requires resolvable customer")
         payload["customer"] = {"id": customer_id}
         manager_spec = related.get("project_manager") or related.get("employee") or {}
         manager_id = _resolve_project_manager(client, manager_spec, operations) if manager_spec else None
@@ -1006,7 +1006,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
     elif task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
         expense_id = fields.get("travel_expense_id")
         if expense_id is None:
-            raise TripletexClientError("Travel expense update requires expense id")
+            raise TripletexClientError(message="Travel expense update requires expense id")
         payload = dict(fields)
         payload.pop("travel_expense_id", None)
         existing = client.find_by_id("travelExpense", int(expense_id)) or {}
@@ -1032,7 +1032,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
     elif task_type == TaskType.DELETE_VOUCHER:
         voucher_id = fields.get("voucher_id")
         if voucher_id is None:
-            raise TripletexClientError("Voucher deletion requires voucher id")
+            raise TripletexClientError(message="Voucher deletion requires voucher id")
         voucher = client.find_by_id("ledger/voucher", int(voucher_id))
         operations.append(OperationResult(name="lookup-voucher", resource_id=int(voucher_id), payload=voucher))
         client.delete_resource("ledger/voucher", int(voucher_id))

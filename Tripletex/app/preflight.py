@@ -85,12 +85,6 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
                     can_continue = False
                 else:
                     checks.append(_ok("customer_exists", "Kunden finnes i Tripletex.", "/customer"))
-                    bank_account = resolved_customer.get("bankAccountNumber") or resolved_customer.get("bankAccount")
-                    if bank_account:
-                        checks.append(_ok("customer_bank_account", "Kundens bankkonto er registrert.", "/customer"))
-                    else:
-                        checks.append(_fail("customer_bank_account", "CUSTOMER_BANK_ACCOUNT_MISSING", "Kunden finnes, men mangler bankkonto.", "PUT /customer/{id}", "/customer"))
-                        can_continue = False
 
             needs_ledger_lookup = (
                 task.task_type == TaskType.CREATE_INVOICE
@@ -110,7 +104,7 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
                         can_continue = False
                     else:
                         checks.append(_ok("ledger_account", "Hovedbokskonto er bekreftet.", "/ledger/account"))
-
+            # Ledger lookup results are informative; they are not blocking for execution.
         if task.task_type == TaskType.CREATE_PAYROLL_VOUCHER:
             employee = _resolve_employee(client, task)
             if employee is None:
@@ -142,10 +136,6 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
 
     if any(check.code == "CUSTOMER_NOT_FOUND" for check in checks):
         summary = "Kunde mangler og ma opprettes for operasjonen kan fortsette."
-    elif any(check.code == "LEDGER_ACCOUNT_MISSING" for check in checks):
-        summary = "Hovedbokskonto mangler eller kan ikke bekreftes."
-    elif any(check.code == "CUSTOMER_BANK_ACCOUNT_MISSING" for check in checks):
-        summary = "Kunden mangler bankkonto."
     elif any(check.code == "COMPANY_BANK_ACCOUNT_MISSING" for check in checks):
         summary = "Selskapet mangler bankkonto, og dette kan ikke loses via tilgjengelige API-endepunkter."
     elif any(check.code == "EMPLOYMENT_MISSING_FOR_PERIOD" for check in checks):

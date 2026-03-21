@@ -37,6 +37,11 @@ def _record_environment_block(base_url: str, summary: str) -> None:
     _ENVIRONMENT_BLOCKERS.setdefault(key, summary)
 
 
+def _is_ledger_only_block(preflight_response) -> bool:
+    failure_codes = {check.code for check in preflight_response.checks if check.result == "FAIL" and check.code}
+    return bool(failure_codes) and failure_codes <= {"LEDGER_ACCOUNT_MISSING"}
+
+
 def require_api_key(authorization: Optional[str] = Header(default=None)) -> None:
     if not settings.api_key:
         return
@@ -179,7 +184,7 @@ def solve(
     base_url = str(request.tripletex_credentials.base_url)
     client = get_tripletex_client(request, transport)
     try:
-        if parsed_task.task_type in PREFLIGHT_ENFORCED_TASKS:
+        if settings.enable_preflight and parsed_task.task_type in PREFLIGHT_ENFORCED_TASKS:
             cached_reason = _environment_block_summary(base_url)
             if cached_reason:
                 logger.warning(
@@ -192,7 +197,15 @@ def solve(
                     detail=f"environment_blocked: {cached_reason}",
                 )
             preflight_response = validate_preflight(client, parsed_task)
-            if not preflight_response.can_continue:
+            ledger_only_block = _is_ledger_only_block(preflight_response)
+            if ledger_only_block:
+                logger.warning(
+                    "solve_preflight_ledger_issue task_type=%s summary=%s checks=%r",
+                    parsed_task.task_type,
+                    preflight_response.summary,
+                    [check.dict() for check in preflight_response.checks],
+                )
+            elif not preflight_response.can_continue:
                 failure_type = "environment_blocked" if any(
                     check.code in {"COMPANY_BANK_ACCOUNT_MISSING", "CUSTOMER_BANK_ACCOUNT_MISSING"} for check in preflight_response.checks
                 ) else "user_input_not_supported"
