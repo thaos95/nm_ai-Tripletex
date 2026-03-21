@@ -182,6 +182,23 @@ SUPPLIER_INVOICE_TOKENS = [
     "vorsteuer",
     "einschliesslich mwst",
     "einschlie lich mwst",
+    # Spanish
+    "factura de proveedor",
+    "factura del proveedor",
+    "factura recibida",
+    # Portuguese
+    "fatura do fornecedor",
+    "fatura de fornecedor",
+    "fatura recebida",
+    "nota fiscal de entrada",
+    # French
+    "facture fournisseur",
+    "facture du fournisseur",
+    "facture recue",
+    # Nynorsk
+    "leverandorfaktura",
+    "motteken faktura",
+    "innganande faktura",
 ]
 
 
