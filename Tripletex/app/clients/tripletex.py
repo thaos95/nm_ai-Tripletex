@@ -1,27 +1,51 @@
 from dataclasses import dataclass, field
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
-import re
-import unicodedata
+
+LOGGER = logging.getLogger(__name__)
+
+ALLOWED_RESOURCES = {
+    "employee",
+    "customer",
+    "product",
+    "project",
+    "invoice",
+    "order",
+    "department",
+    "ledger",
+    "travelExpense",
+    "supplier",
+    "supplierInvoice",
+    "voucher",
+    "bank",
+    "currency",
+    "company",
+    "token",
+    "subscription",
+    "contact",
+    "balanceSheet",
+    "resultbudget",
+    "salary",
+}
 
 
 class TripletexClientError(RuntimeError):
     def __init__(
         self,
+        *,
         status_code: Optional[int] = None,
         method: Optional[str] = None,
         path: Optional[str] = None,
         response_text: Optional[str] = None,
-        *,
         message: Optional[str] = None,
-    ):
-        if message is not None:
+    ) -> None:
+        if message:
             super().__init__(message)
-        elif status_code is not None and method and path:
+        elif status_code and method and path:
             text = response_text or ""
-            formatted = f"Tripletex API error {status_code} on {method} {path}: {text}"
-            super().__init__(formatted)
+            super().__init__(f"Tripletex API error {status_code} on {method} {path}: {text}")
         else:
             super().__init__(message or "Tripletex client error")
         self.status_code = status_code
@@ -35,6 +59,7 @@ class TripletexClient:
     base_url: str
     session_token: str
     verify_tls: bool = True
+    timeout: float = 20.0
     transport: Optional[httpx.BaseTransport] = None
     operations: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -42,189 +67,80 @@ class TripletexClient:
         self._client = httpx.Client(
             base_url=self.base_url.rstrip("/"),
             auth=("0", self.session_token),
-            timeout=20.0,
+            timeout=self.timeout,
             verify=self.verify_tls,
             transport=self.transport,
+            headers={"Content-Type": "application/json"},
         )
 
     def close(self) -> None:
         self._client.close()
 
+    def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self._request("GET", path, params=params or {})
+
+    def post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", path, json=payload)
+
+    def put(self, path: str, payload: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self._request("PUT", path, json=payload or {}, params=params or {})
+
+    def delete(self, path: str) -> Dict[str, Any]:
+        return self._request("DELETE", path)
+
     def _request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
-        response = self._client.request(method, path, **kwargs)
+        normalized_path = self._normalize_path(path)
+        self._ensure_allowed(normalized_path)
+
+        print("TRIPLETEX REQUEST:", method, normalized_path, kwargs.get("json"))
+        try:
+            response = self._client.request(method, normalized_path, **kwargs)
+        except httpx.HTTPError as exc:
+            raise TripletexClientError(message=str(exc)) from exc
         self.operations.append(
             {
                 "method": method,
-                "path": path,
+                "path": normalized_path,
                 "params": kwargs.get("params"),
                 "json": kwargs.get("json"),
                 "status_code": response.status_code,
             }
         )
+        LOGGER.info(
+            "Tripletex request method=%s path=%s status=%s payload=%s",
+            method,
+            normalized_path,
+            response.status_code,
+            kwargs.get("json"),
+        )
         if response.is_error:
             raise TripletexClientError(
                 status_code=response.status_code,
                 method=method,
-                path=path,
-                response_text=response.text or response.content.decode("utf-8", errors="ignore"),
+                path=normalized_path,
+                response_text=response.text,
             )
         if not response.content:
             return {}
-        return response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            return {"text": response.text}
+        return self._normalize_response(data)
 
-    def list_resource(self, resource: str, **params: Any) -> Dict[str, Any]:
-        return self._request("GET", "/" + resource.strip("/"), params=params)
+    def _normalize_path(self, path: str) -> str:
+        normalized = path if path.startswith("/") else f"/{path}"
+        return normalized
 
-    def create_resource(self, resource: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/" + resource.strip("/"), json=payload)
+    def _ensure_allowed(self, path: str) -> None:
+        stripped = path.lstrip("/")
+        first_segment = stripped.split("/", 1)[0].split(":", 1)[0]
+        if first_segment not in ALLOWED_RESOURCES:
+            raise TripletexClientError(message=f"Endpoint '{first_segment}' is not allowed")
 
-    def update_resource(self, resource: str, resource_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("PUT", "/{0}/{1}".format(resource.strip("/"), resource_id), json=payload)
-
-    def delete_resource(self, resource: str, resource_id: int) -> Dict[str, Any]:
-        return self._request("DELETE", "/{0}/{1}".format(resource.strip("/"), resource_id))
-
-    def _match_value(self, candidate: Dict[str, Any], field: str) -> Optional[str]:
-        value = candidate.get(field)
-        if value is not None:
-            return self._normalize_field_value(field, value)
-        nested_map = {
-            "first_name": "firstName",
-            "last_name": "lastName",
-            "mobilePhoneNumber": "mobilePhoneNumber",
-            "phoneNumberMobile": "phoneNumberMobile",
-            "phoneNumber": "phoneNumber",
-        }
-        nested = nested_map.get(field)
-        if nested and candidate.get(nested) is not None:
-            return self._normalize_field_value(field, candidate.get(nested))
-        return None
-
-    def _normalize_field_value(self, field: str, value: Any) -> str:
-        if value is None:
-            return ""
-
-        text = str(value).strip()
-        if field in {"organizationNumber", "employeeNumber", "productNumber"}:
-            return "".join(ch for ch in text if ch.isdigit())
-        if field in {"phoneNumber", "phoneNumberMobile", "mobilePhoneNumber"}:
-            return "".join(ch for ch in text if ch.isdigit() or ch == "+")
-        if field == "email":
-            return text.lower()
-        return self._normalize_string(text)
-
-    def _normalize_string(self, value: Any) -> str:
-        text = unicodedata.normalize("NFKD", str(value))
-        text = "".join(char for char in text if not unicodedata.combining(char))
-        text = text.strip().lower()
-        text = re.sub(r"[^\w@.+\-]+", " ", text, flags=re.UNICODE)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
-
-    def _candidate_matches(self, candidate: Dict[str, Any], normalized_match: Dict[str, str]) -> bool:
-        if all(self._match_value(candidate, key) == value for key, value in normalized_match.items()):
-            return True
-
-        first_name = normalized_match.get("first_name")
-        last_name = normalized_match.get("last_name")
-        if first_name and last_name:
-            candidate_full_name = self._normalize_string(
-                "{0} {1}".format(candidate.get("firstName", ""), candidate.get("lastName", "")).strip()
-            )
-            target_full_name = self._normalize_string("{0} {1}".format(first_name, last_name))
-            return candidate_full_name == target_full_name
-        return False
-
-    def _candidate_score(self, candidate: Dict[str, Any], normalized_match: Dict[str, str]) -> int:
-        score = 0
-        weights = {
-            "organizationNumber": 6,
-            "email": 6,
-            "employeeNumber": 6,
-            "productNumber": 6,
-            "first_name": 3,
-            "last_name": 3,
-            "name": 2,
-            "phoneNumber": 2,
-            "phoneNumberMobile": 2,
-            "mobilePhoneNumber": 2,
-        }
-
-        for key, value in normalized_match.items():
-            candidate_value = self._match_value(candidate, key)
-            if candidate_value is None:
-                continue
-            if candidate_value == value:
-                score += weights.get(key, 1)
-                continue
-            if key == "name":
-                if candidate_value.startswith(value) or value.startswith(candidate_value):
-                    score += 1
-            elif key in {"first_name", "last_name"}:
-                if candidate_value.startswith(value) or value.startswith(candidate_value):
-                    score += 1
-
-        first_name = normalized_match.get("first_name")
-        last_name = normalized_match.get("last_name")
-        if first_name and last_name:
-            candidate_full_name = self._normalize_string(
-                "{0} {1}".format(candidate.get("firstName", ""), candidate.get("lastName", "")).strip()
-            )
-            target_full_name = self._normalize_string("{0} {1}".format(first_name, last_name))
-            if candidate_full_name == target_full_name:
-                score += 4
-
-        return score
-
-    def _has_strong_identifier(self, normalized_match: Dict[str, str]) -> bool:
-        if any(
-            normalized_match.get(key)
-            for key in ("organizationNumber", "email", "employeeNumber", "productNumber", "phoneNumber", "phoneNumberMobile", "mobilePhoneNumber")
-        ):
-            return True
-        return bool(normalized_match.get("first_name") and normalized_match.get("last_name"))
-
-    def find_single(self, resource: str, match_fields: Dict[str, Any], fields: str = "*") -> Optional[Dict[str, Any]]:
-        if not match_fields:
-            return None
-
-        query_params = {"fields": fields, "count": 200}
-        for key in ("name", "email", "first_name", "last_name", "organizationNumber", "productNumber", "employeeNumber"):
-            if key in match_fields:
-                param_name = "firstName" if key == "first_name" else "lastName" if key == "last_name" else key
-                query_params[param_name] = match_fields[key]
-
-        response = self.list_resource(resource, **query_params)
-        values = response.get("values", [])
-        if not values:
-            return None
-
-        normalized_match = dict((key, self._normalize_field_value(key, value)) for key, value in match_fields.items())
-        exact_matches = []
-        for candidate in values:
-            if self._candidate_matches(candidate, normalized_match):
-                exact_matches.append(candidate)
-
-        if len(exact_matches) == 1:
-            return exact_matches[0]
-        if exact_matches:
-            return None
-        scored = sorted(
-            ((self._candidate_score(candidate, normalized_match), candidate) for candidate in values),
-            key=lambda item: item[0],
-            reverse=True,
-        )
-        if scored and scored[0][0] >= 2:
-            if len(scored) == 1 or scored[0][0] > scored[1][0]:
-                return scored[0][1]
-        if len(values) == 1 and self._has_strong_identifier(normalized_match):
-            return values[0]
-        return None
-
-    def find_by_id(self, resource: str, resource_id: int, fields: str = "*") -> Optional[Dict[str, Any]]:
-        response = self._request("GET", "/{0}/{1}".format(resource.strip("/"), resource_id), params={"fields": fields})
-        if "value" in response and isinstance(response["value"], dict):
-            return response["value"]
-        if response:
-            return response
-        return None
+    def _normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if "values" in data:
+            return data
+        if "value" in data:
+            return {"value": data["value"]}
+        return data

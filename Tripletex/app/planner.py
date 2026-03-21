@@ -1,139 +1,81 @@
-from app.schemas import ExecutionPlan, ParsedTask, PlannedStep, TaskType
+import logging
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.schemas import Plan, PlanStep, SolveRequest
+
+LOGGER = logging.getLogger(__name__)
+
+TASK_KEYWORDS: List[Tuple[str, List[str]]] = [
+    ("create_department", ["avdeling", "avdelinger", "department", "departamento"]),
+    ("create_customer", ["kunde", "customer", "cliente"]),
+    ("create_employee", ["employee", "ansatt", "empleado"]),
+    ("create_product", ["produkt", "product", "produto"]),
+    ("create_project", ["project", "prosjekt", "proyecto"]),
+    ("create_invoice", ["invoice", "faktura", "factura", "facture"]),
+    ("register_payment", ["payment", "betaling", "pago"]),
+    ("create_project_billing", ["project billing", "prosjektfakturering"]),
+    ("create_credit_note", ["credit note", "kreditnota", "creditnota"]),
+]
+
+LANGUAGE_MARKERS: Dict[str, List[str]] = {
+    "nb": ["kunde", "faktura", "prosjekt"],
+    "en": ["customer", "invoice", "project"],
+    "es": ["cliente", "factura", "proyecto"],
+    "pt": ["cliente", "fatura", "projeto"],
+    "nn": ["kunde", "faktura", "prosjekt"],
+    "de": ["kunde", "rechnung", "projekt"],
+    "fr": ["client", "facture", "projet"],
+}
 
 
-def _invoice_requires_product_resolution(parsed_task: ParsedTask) -> bool:
-    if any(key.startswith("order_line_") for key in parsed_task.related_entities):
-        return False
-    product_spec = parsed_task.related_entities.get("product", {})
-    if product_spec.get("description"):
-        return False
-    invoice_spec = parsed_task.related_entities.get("invoice", {})
-    if invoice_spec.get("description"):
-        return False
-    order_spec = parsed_task.related_entities.get("order", {})
-    if order_spec.get("description"):
-        return False
-    if product_spec.get("name"):
-        return False
-    return True
+def _keyword_matches(keyword: str, text: str) -> bool:
+    pattern = r"\b" + re.escape(keyword) + r"\b"
+    return bool(re.search(pattern, text))
 
 
-def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
-    task_type = parsed_task.task_type
-    steps = []
+def _detect_task_type(prompt: str) -> str:
+    normalized = prompt.lower()
+    scores: Dict[str, int] = {}
+    priority: Dict[str, int] = {}
+    for position, (task, keywords) in enumerate(TASK_KEYWORDS):
+        priority[task] = position
+        for keyword in keywords:
+            if _keyword_matches(keyword, normalized):
+                scores[task] = scores.get(task, 0) + 1
+    if not scores:
+        return "unsupported"
+    best_task = max(scores.items(), key=lambda item: (item[1], -priority.get(item[0], 0)))[0]
+    return best_task
 
-    if task_type == TaskType.CREATE_EMPLOYEE:
-        steps.append(PlannedStep(name="create-employee", resource="employee", action="create"))
-    elif task_type == TaskType.UPDATE_EMPLOYEE:
-        steps.extend(
-            [
-                PlannedStep(name="find-employee", resource="employee", action="find"),
-                PlannedStep(name="update-employee", resource="employee", action="update"),
-            ]
-        )
-    elif task_type == TaskType.LIST_EMPLOYEES:
-        steps.append(PlannedStep(name="list-employees", resource="employee", action="list"))
-    elif task_type == TaskType.CREATE_CUSTOMER:
-        steps.append(PlannedStep(name="create-customer", resource="customer", action="create"))
-    elif task_type == TaskType.UPDATE_CUSTOMER:
-        steps.extend(
-            [
-                PlannedStep(name="find-customer", resource="customer", action="find"),
-                PlannedStep(name="update-customer", resource="customer", action="update"),
-            ]
-        )
-    elif task_type == TaskType.SEARCH_CUSTOMERS:
-        steps.append(PlannedStep(name="search-customers", resource="customer", action="list"))
-    elif task_type == TaskType.CREATE_PRODUCT:
-        steps.append(PlannedStep(name="create-product", resource="product", action="create"))
-    elif task_type == TaskType.CREATE_PROJECT:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-project-customer", resource="customer", action="resolve"),
-                PlannedStep(name="create-project", resource="project", action="create"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_DEPARTMENT:
-        steps.append(PlannedStep(name="create-department", resource="department", action="create"))
-    elif task_type == TaskType.CREATE_ORDER:
-        steps.append(PlannedStep(name="resolve-order-customer", resource="customer", action="resolve"))
-        if _invoice_requires_product_resolution(parsed_task):
-            steps.append(PlannedStep(name="resolve-order-product", resource="product", action="resolve"))
-        steps.append(PlannedStep(name="create-order", resource="order", action="create"))
-    elif task_type == TaskType.CREATE_INVOICE:
-        steps.append(PlannedStep(name="resolve-invoice-customer", resource="customer", action="resolve"))
-        if _invoice_requires_product_resolution(parsed_task):
-            steps.append(PlannedStep(name="resolve-invoice-product", resource="product", action="resolve"))
-        steps.extend(
-            [
-                PlannedStep(name="create-order", resource="order", action="create"),
-                PlannedStep(name="create-invoice", resource="invoice", action="create"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_SUPPLIER_INVOICE:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-supplier", resource="supplier", action="resolve"),
-                PlannedStep(name="create-supplier-invoice", resource="supplierInvoice", action="create"),
-            ]
-        )
-    elif task_type == TaskType.REVERSE_PAYMENT:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-payment-customer", resource="customer", action="resolve"),
-                PlannedStep(name="resolve-payment-invoice", resource="invoice", action="resolve"),
-                PlannedStep(name="reverse-invoice-payment", resource="invoice", action="update"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_CREDIT_NOTE:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-credit-customer", resource="customer", action="resolve"),
-                PlannedStep(name="resolve-credit-invoice", resource="invoice", action="resolve"),
-                PlannedStep(name="create-credit-note", resource="invoice", action="update"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_PROJECT_BILLING:
-        steps.extend(
-            [
-                PlannedStep(name="resolve-billing-customer", resource="customer", action="resolve"),
-                PlannedStep(name="resolve-billing-project-manager", resource="employee", action="resolve"),
-                PlannedStep(name="create-billing-project", resource="project", action="create"),
-                PlannedStep(name="create-billing-order", resource="order", action="create"),
-                PlannedStep(name="create-billing-invoice", resource="invoice", action="create"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
-        steps.extend(
-            [
-                PlannedStep(name="create-dimension", resource="ledger/accountingDimensionName", action="create"),
-                PlannedStep(name="create-dimension-values", resource="ledger/accountingDimensionValue", action="create"),
-                PlannedStep(name="create-dimension-voucher", resource="ledger/voucher", action="create"),
-            ]
-        )
-    elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
-        steps.append(PlannedStep(name="create-payroll-voucher", resource="ledger/voucher", action="create"))
-    elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
-        steps.append(PlannedStep(name="create-travel-expense", resource="travelExpense", action="create"))
-    elif task_type == TaskType.UPDATE_TRAVEL_EXPENSE:
-        steps.extend(
-            [
-                PlannedStep(name="find-travel-expense", resource="travelExpense", action="find"),
-                PlannedStep(name="update-travel-expense", resource="travelExpense", action="update"),
-            ]
-        )
-    elif task_type == TaskType.DELETE_TRAVEL_EXPENSE:
-        steps.extend(
-            [
-                PlannedStep(name="lookup-travel-expense", resource="travelExpense", action="find"),
-                PlannedStep(name="delete-travel-expense", resource="travelExpense", action="delete"),
-            ]
-        )
-    elif task_type == TaskType.DELETE_VOUCHER:
-        steps.append(PlannedStep(name="delete-voucher", resource="ledger/voucher", action="delete"))
-    elif task_type == TaskType.LIST_LEDGER_ACCOUNTS:
-        steps.append(PlannedStep(name="list-ledger-accounts", resource="ledger/account", action="list"))
-    elif task_type == TaskType.LIST_LEDGER_POSTINGS:
-        steps.append(PlannedStep(name="list-ledger-postings", resource="ledger/posting", action="list"))
 
-    return ExecutionPlan(parsed_task=parsed_task, steps=steps)
+def _detect_language(prompt: str) -> str:
+    normalized = prompt.lower()
+    for lang, markers in LANGUAGE_MARKERS.items():
+        if any(marker in normalized for marker in markers):
+            return lang
+    return "unknown"
+
+
+def create_plan(
+    request: SolveRequest, attachments: Optional[List[Dict[str, Any]]] = None
+) -> Plan:
+    task_type = _detect_task_type(request.prompt)
+    language = _detect_language(request.prompt)
+    
+    print("PLANNER TASK TYPE:", task_type)
+    print("PLANNER PROMPT:", request.prompt)
+    
+    LOGGER.info("Planner detected task=%s language=%s prompt=%s", task_type, language, request.prompt[:80])
+    step = PlanStep(
+        id="step-1",
+        name="primary-action",
+        action=task_type,
+        details={
+            "prompt": request.prompt[:400],
+            "attachments": attachments or [],
+        },
+    )
+    return Plan(
+        language=language, task_type=task_type, primary_entity=task_type, steps=[step]
+    )

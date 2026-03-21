@@ -1,0 +1,14 @@
+2026-03-20 18:31:28 tripletex-agent solve_start task_type=create_invoice prompt='Opprett en ordre for kunden Snøhetta AS (org.nr 800082021) med produktene Webdesign (2797) til 33100 kr og Analyserapport (5684) til 18550 kr. Konverter ordren til faktura og registrer full betaling.'
+2026-03-20 18:31:33 Tripletex API error 422 on POST /invoice: {"status":422,"code":16000,"message":"Request mapping failed","validationMessages":[{"field":"markAsPaid","message":"Feltet eksisterer ikke i objektet."}]}
+
+2026-03-20 18:32:20 tripletex-agent solve_start task_type=create_invoice prompt='Betalinga frå Strandvik AS (org.nr 859256333) for fakturaen "Nettverksteneste" (41550 kr ekskl. MVA) vart returnert av banken. Reverser betalinga slik at fakturaen igjen viser uteståande beløp.'
+2026-03-20 18:32:25 tripletex-agent solve_completed task_type=TaskType.CREATE_INVOICE operations=3
+
+2026-03-20 18:33:07 tripletex-agent solve_start task_type=create_invoice prompt='Opprett ein faktura til kunden Nordlys AS (org.nr 974956845) med tre produktlinjer: Systemutvikling (8642) til 9550 kr med 25 % MVA, Datarådgjeving (5857) til 14600 kr med 15 % MVA (næringsmiddel), og Nettverksteneste (9733) til 19450 kr med 0 % MVA (avgiftsfri).'
+2026-03-20 18:33:12 Tripletex API error 422 on POST /invoice: {"status":422,"code":18000,"message":"Validering feilet.","validationMessages":[{"field":null,"message":"Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer."}]}
+
+2026-03-20 18:34:58 tripletex-agent solve_start task_type=create_dimension_voucher prompt='Crie uma dimensão contabilística personalizada "Region" com os valores "Sør-Norge" e "Nord-Norge". Em seguida, lance um documento na conta 7140 por 23050 NOK, vinculado ao valor de dimensão "Sør-Norge".'
+2026-03-20 18:34:59 Tripletex API error 404 on POST /dimension: {"status":404,"code":6000,"message":"Object not found"}
+
+2026-03-20 18:35:50 tripletex-agent solve_start task_type=create_dimension_voucher prompt='Crie uma dimensão contabilística personalizada "Region" com os valores "Sør-Norge" e "Midt-Norge". Em seguida, lance um documento na conta 6540 por 5150 NOK, vinculado ao valor de dimensão "Sør-Norge".'
+2026-03-20 18:35:54 Tripletex API error 404 on POST /dimension: {"status":404,"code":6000,"message":"Object not found"}
