@@ -580,12 +580,14 @@ def _create_order(
         line["count"] = 1
         order_lines.append(_compact_payload(line))
 
+    today = date.today().isoformat()
     order_payload = {
         "customer": {"id": customer_id},
-        "orderDate": parsed_fields.get("orderDate") or parsed_fields.get("invoiceDate"),
+        "orderDate": parsed_fields.get("orderDate") or parsed_fields.get("invoiceDate") or today,
         "deliveryDate": parsed_fields.get("deliveryDate")
         or parsed_fields.get("orderDate")
-        or parsed_fields.get("invoiceDate"),
+        or parsed_fields.get("invoiceDate")
+        or today,
         "orderLines": order_lines,
     }
     response = client.create_resource("order", _compact_payload(order_payload))
