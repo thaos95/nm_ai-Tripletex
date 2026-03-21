@@ -965,8 +965,36 @@ def _classify_intent(lowered: str) -> Optional[str]:
     return None
 
 
+UNSUPPORTED_INTENT_TOKENS = [
+    "avstem",
+    "bankutskrift",
+    "bank statement",
+    "reconcil",
+    "bank reconcil",
+    "rapportering",
+    "avslutt regnskapet",
+    "arsoppgjor",
+    "aarsoppgjor",
+    "mva-melding",
+    "mva melding",
+    "a-melding",
+    "altinn",
+]
+
+
 def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     lowered = _normalized_text(prompt)
+
+    # Early exit for prompts that are clearly outside supported task types
+    if any(token in lowered for token in UNSUPPORTED_INTENT_TOKENS):
+        return ParsedTask(
+            task_type=TaskType.UNSUPPORTED,
+            confidence=0.95,
+            language_hint=_language_hint(prompt),
+            fields={},
+            notes=["Prompt matches unsupported intent pattern."],
+        )
+
     action = _detect_action(lowered)
     entity = _detect_entity(lowered)
     classified_intent = _classify_intent(lowered)
@@ -1729,7 +1757,7 @@ def parse_prompt(prompt: str) -> ParsedTask:
     rule_based = parse_prompt_rule_based(prompt)
     if rule_based.task_type == TaskType.UNSUPPORTED and rule_based.confidence >= 0.9:
         return rule_based
-    if rule_based.task_type == TaskType.CREATE_SUPPLIER_INVOICE and rule_based.confidence >= 0.9:
+    if rule_based.task_type == TaskType.CREATE_SUPPLIER_INVOICE and rule_based.confidence >= 0.9 and rule_based.related_entities.get("supplier"):
         return rule_based
     if rule_based.task_type in {
         TaskType.CREATE_EMPLOYEE,
