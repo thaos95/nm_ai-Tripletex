@@ -11,7 +11,7 @@ from app.logging_utils import get_logger
 from app.parser import parse_prompt
 from app.planner import build_plan
 from app.prompt_lab import prompt_lab_page
-from app.preflight import validate_preflight
+from app.preflight import PREFLIGHT_ENFORCED_TASKS, validate_preflight
 from app.schemas import InspectRequest, InspectResponse, SolveRequest, SolveResponse, TaskType, ValidateRequest, ValidateResponse
 from app.task_contracts import get_task_contract
 from app.validator import validate_and_normalize_task
@@ -20,6 +20,21 @@ from app.workflows.executor import execute_plan
 
 logger = get_logger()
 app = FastAPI(title="Tripletex Agent", version="0.1.0")
+
+_ENVIRONMENT_BLOCKERS: Dict[str, str] = {}
+
+
+def _base_url_key(base_url: str) -> str:
+    return base_url.rstrip("/")
+
+
+def _environment_block_summary(base_url: str) -> Optional[str]:
+    return _ENVIRONMENT_BLOCKERS.get(_base_url_key(base_url))
+
+
+def _record_environment_block(base_url: str, summary: str) -> None:
+    key = _base_url_key(base_url)
+    _ENVIRONMENT_BLOCKERS.setdefault(key, summary)
 
 
 def require_api_key(authorization: Optional[str] = Header(default=None)) -> None:
@@ -161,8 +176,39 @@ def solve(
     if parsed_task.task_type == TaskType.UNSUPPORTED:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unsupported task")
 
+    base_url = str(request.tripletex_credentials.base_url)
     client = get_tripletex_client(request, transport)
     try:
+        if parsed_task.task_type in PREFLIGHT_ENFORCED_TASKS:
+            cached_reason = _environment_block_summary(base_url)
+            if cached_reason:
+                logger.warning(
+                    "solve_preflight_cached_block task_type=%s summary=%s",
+                    parsed_task.task_type,
+                    cached_reason,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_424_FAILED_DEPENDENCY,
+                    detail=f"environment_blocked: {cached_reason}",
+                )
+            preflight_response = validate_preflight(client, parsed_task)
+            if not preflight_response.can_continue:
+                failure_type = "environment_blocked" if any(
+                    check.code in {"COMPANY_BANK_ACCOUNT_MISSING", "CUSTOMER_BANK_ACCOUNT_MISSING"} for check in preflight_response.checks
+                ) else "user_input_not_supported"
+                if failure_type == "environment_blocked":
+                    _record_environment_block(base_url, preflight_response.summary)
+                logger.warning(
+                    "solve_preflight_blocked task_type=%s failure_type=%s summary=%s checks=%r",
+                    parsed_task.task_type,
+                    failure_type,
+                    preflight_response.summary,
+                    [check.dict() for check in preflight_response.checks],
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_424_FAILED_DEPENDENCY,
+                    detail=f"{failure_type}: {preflight_response.summary}",
+                )
         if not segments:
             result = execute_plan(client, plan)
         else:
@@ -175,7 +221,7 @@ def solve(
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     except TripletexClientError as exc:
-        classified = classify_tripletex_error(str(exc))
+        classified = classify_tripletex_error(exc)
         logger.exception(
             "solve_failed task_type=%s error_category=%s recoverable=%s prompt=%r",
             parsed_task.task_type,
@@ -183,6 +229,8 @@ def solve(
             classified.recoverable,
             request.prompt[:500],
         )
+        if classified.category == TripletexErrorCategory.VALIDATION_ENVIRONMENT:
+            _record_environment_block(base_url, classified.summary)
         if classified.category in {
             TripletexErrorCategory.UNAUTHORIZED,
             TripletexErrorCategory.WRONG_ENDPOINT,

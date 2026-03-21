@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Union
 
 
 class TripletexErrorCategory(str, Enum):
@@ -10,6 +10,7 @@ class TripletexErrorCategory(str, Enum):
     VALIDATION_ENVIRONMENT = "validation_environment"
     VALIDATION_GENERIC = "validation_generic"
     NO_RESULTS = "no_results"
+    NOT_FOUND = "not_found"
     TIMEOUT = "timeout"
     UNKNOWN = "unknown"
 
@@ -22,10 +23,15 @@ class ClassifiedTripletexError:
     raw_message: str
 
 
-def classify_tripletex_error(raw_message: str) -> ClassifiedTripletexError:
+def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> ClassifiedTripletexError:
+    status_code = getattr(exc, "status_code", None)
+    raw_message = getattr(exc, "response_text", None) or str(exc)
     message = (raw_message or "").lower()
 
-    if "401" in message and "unauthorized" in message:
+    def is_proxy_blocked() -> bool:
+        return "proxy token" in message or "proxy-token" in message
+
+    if status_code == 401 or ("401" in message and "unauthorized" in message):
         return ClassifiedTripletexError(
             category=TripletexErrorCategory.UNAUTHORIZED,
             recoverable=False,
@@ -33,11 +39,32 @@ def classify_tripletex_error(raw_message: str) -> ClassifiedTripletexError:
             raw_message=raw_message,
         )
 
-    if "404" in message and ("wrong endpoint path" in message or "not found" in message):
+    if status_code == 404 or "404" in message:
+        if "wrong endpoint path" in message or "not found" in message:
+            category = TripletexErrorCategory.WRONG_ENDPOINT
+            summary = "Tripletex endpoint path is invalid for this request."
+        else:
+            category = TripletexErrorCategory.NOT_FOUND
+            summary = "Requested Tripletex resource was not found."
         return ClassifiedTripletexError(
-            category=TripletexErrorCategory.WRONG_ENDPOINT,
+            category=category,
             recoverable=False,
-            summary="Tripletex endpoint path is invalid for this request.",
+            summary=summary,
+            raw_message=raw_message,
+        )
+
+    if status_code == 403 or ("403" in message and "forbidden" in message):
+        if is_proxy_blocked():
+            return ClassifiedTripletexError(
+                category=TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+                recoverable=False,
+                summary="Proxy token is invalid or expired; refresh credentials before proceeding.",
+                raw_message=raw_message,
+            )
+        return ClassifiedTripletexError(
+            category=TripletexErrorCategory.UNKNOWN,
+            recoverable=False,
+            summary="Access was forbidden by Tripletex.",
             raw_message=raw_message,
         )
 
@@ -57,8 +84,8 @@ def classify_tripletex_error(raw_message: str) -> ClassifiedTripletexError:
             raw_message=raw_message,
         )
 
-    if "422" in message or "validation_error" in message or "validation" in message:
-        if "bankkontonummer" in message or "bank account" in message or "module" in message:
+    if status_code == 422 or "validation_error" in message or "validation" in message:
+        if "bankkontonummer" in message or "bank account" in message or "bankkonto" in message or "module" in message:
             return ClassifiedTripletexError(
                 category=TripletexErrorCategory.VALIDATION_ENVIRONMENT,
                 recoverable=False,

@@ -122,7 +122,7 @@ def validate_preflight(client: TripletexClient, task: ParsedTask) -> ValidateRes
                 checks.append(_fail("employment_for_period", "EMPLOYMENT_MISSING_FOR_PERIOD", "Ansatt mangler gyldig ansettelsesforhold for perioden.", None, None))
                 can_continue = False
     except TripletexClientError as exc:
-        classified = classify_tripletex_error(str(exc))
+        classified = classify_tripletex_error(exc)
         if classified.category.value == "validation_environment":
             checks.append(
                 _fail(

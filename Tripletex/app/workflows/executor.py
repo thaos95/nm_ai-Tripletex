@@ -163,7 +163,7 @@ def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
     if fields.get("creditNote"):
         return False
-    classified = classify_tripletex_error(str(exc))
+    classified = classify_tripletex_error(exc)
     return classified.category == TripletexErrorCategory.VALIDATION_GENERIC
 
 
@@ -541,7 +541,7 @@ def _register_invoice_payment(
             params=_build_invoice_payment_payload(fields),
         )
     except TripletexClientError as exc:
-        classified = classify_tripletex_error(str(exc))
+        classified = classify_tripletex_error(exc)
         if exc.status_code == 404 and classified.category in {
             TripletexErrorCategory.NOT_FOUND,
             TripletexErrorCategory.WRONG_ENDPOINT,

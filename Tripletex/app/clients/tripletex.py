@@ -7,7 +7,13 @@ import unicodedata
 
 
 class TripletexClientError(RuntimeError):
-    pass
+    def __init__(self, status_code: int, method: str, path: str, response_text: str):
+        message = f"Tripletex API error {status_code} on {method} {path}: {response_text}"
+        super().__init__(message)
+        self.status_code = status_code
+        self.method = method
+        self.path = path
+        self.response_text = response_text
 
 
 @dataclass
@@ -43,9 +49,10 @@ class TripletexClient:
         )
         if response.is_error:
             raise TripletexClientError(
-                "Tripletex API error {0} on {1} {2}: {3}".format(
-                    response.status_code, method, path, response.text
-                )
+                status_code=response.status_code,
+                method=method,
+                path=path,
+                response_text=response.text or response.content.decode("utf-8", errors="ignore"),
             )
         if not response.content:
             return {}
