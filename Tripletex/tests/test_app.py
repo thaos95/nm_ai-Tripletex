@@ -796,7 +796,7 @@ def test_solve_payment_prompt_is_not_unsupported() -> None:
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
     assert recorded["invoice_payment_payload"]["paidAmount"] == "32200.0"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "32200.0"
     assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
@@ -819,7 +819,7 @@ def test_solve_portuguese_payment_prompt_is_not_unsupported() -> None:
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] == TODAY_ISO
     assert recorded["invoice_payment_payload"]["paidAmount"] == "30450.0"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "30450.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "30450.0"
     assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
@@ -870,7 +870,7 @@ def test_solve_payment_reversal_prompt_is_blocked_as_unsupported() -> None:
     )
     assert response.status_code == 200
     assert recorded["invoice_payment_payload"]["reverse"] == "true"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "41550.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "41550.0"
     app.dependency_overrides.clear()
 
 
@@ -954,7 +954,7 @@ def test_solve_multiline_order_invoice_payment_prompt_builds_multiple_order_line
     assert recorded["order_payload"]["orderLines"][1]["description"] == "Schulung"
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paidAmount"] == "39550.0"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "39550.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "39550.0"
     assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 
@@ -1000,7 +1000,7 @@ def test_solve_supplier_invoice_prompt_uses_supplier_endpoints() -> None:
             if request.method == "POST" and request.url.path == "/v2/supplier":
                 recorded["supplier_payload"] = json.loads(request.content.decode("utf-8"))
                 return httpx.Response(200, json={"value": {"id": 7001}})
-            if request.method == "POST" and request.url.path == "/v2/supplierInvoice":
+            if request.method == "POST" and request.url.path == "/v2/incomingInvoice":
                 recorded["supplier_invoice_payload"] = json.loads(request.content.decode("utf-8"))
                 return httpx.Response(200, json={"value": {"id": 8001}})
             return httpx.Response(404, json={"error": {"message": "not found"}})
@@ -1021,12 +1021,11 @@ def test_solve_supplier_invoice_prompt_uses_supplier_endpoints() -> None:
     assert recorded["calls"] == [
         "GET /v2/supplier",
         "POST /v2/supplier",
-        "POST /v2/supplierInvoice",
+        "POST /v2/incomingInvoice",
     ]
     assert recorded["supplier_payload"]["organizationNumber"] == "967247049"
-    assert recorded["supplier_invoice_payload"]["supplier"]["id"] == 7001
-    assert recorded["supplier_invoice_payload"]["invoiceNumber"] == "INV-2026-9601"
-    assert "vatPercentage" not in recorded["supplier_invoice_payload"]
+    assert recorded["supplier_invoice_payload"]["invoiceHeader"]["vendorId"] == 7001
+    assert recorded["supplier_invoice_payload"]["invoiceHeader"]["invoiceNumber"] == "INV-2026-9601"
     app.dependency_overrides.clear()
 
 

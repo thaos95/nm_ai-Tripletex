@@ -193,8 +193,8 @@ def test_dimension_voucher_workflow_creates_dimension_values_and_voucher() -> No
     ]
     assert recorded["dimension_payload"]["dimensionName"] == "Marked"
     assert recorded["dimension_value_payloads"][0]["description"] == "Bedrift"
-    assert recorded["voucher_payloads"][0]["postings"][0]["account"]["number"] == "6590"
-    assert recorded["voucher_payloads"][0]["postings"][0]["account"]["name"] == recorded["voucher_payloads"][0]["description"]
+    assert recorded["voucher_payloads"][0]["postings"][0]["account"]["number"] == 6590
+    assert "freeAccountingDimension1" in recorded["voucher_payloads"][0]["postings"][0]
     app.dependency_overrides.clear()
 
 

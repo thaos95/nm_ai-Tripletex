@@ -119,7 +119,7 @@ def test_hidden_prompt_corpus_parse_and_validate(
         (
             'O cliente Floresta Lda (org. no 916058896) tem uma fatura pendente de 30450 NOK sem IVA por "Desenvolvimento de sistemas". Registe o pagamento total desta fatura.',
             "invoice_payment_payload",
-            {"paymentDate": TODAY_ISO, "amountPaidCurrency": "30450.0"},
+            {"paymentDate": TODAY_ISO, "paidAmountCurrency": "30450.0"},
             {"sendByEmail"},
         ),
         (

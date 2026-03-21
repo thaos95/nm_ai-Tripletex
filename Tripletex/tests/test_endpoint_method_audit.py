@@ -48,7 +48,7 @@ def audit_transport(recorded: dict) -> httpx.MockTransport:
                 return httpx.Response(200, json={"values": [{"id": 1001, "firstName": "Ola", "lastName": "Nordmann", "email": "ola@example.org"}]})
             if email == "marte@example.org":
                 return httpx.Response(200, json={"values": [{"id": 1001, "firstName": "Marte", "lastName": "Solberg"}]})
-            return httpx.Response(200, json={"values": []})
+            return httpx.Response(200, json={"values": [{"id": 1001, "firstName": "Ola", "lastName": "Nordmann", "employments": [{"id": 1}]}]})
 
         if request.method == "GET" and request.url.path == "/v2/employee/1001":
             return httpx.Response(200, json={"value": {"id": 1001, "firstName": "Marte", "lastName": "Solberg"}})
@@ -104,10 +104,10 @@ def audit_transport(recorded: dict) -> httpx.MockTransport:
         if request.method == "DELETE" and request.url.path == "/v2/ledger/voucher/7":
             return httpx.Response(200, json={})
 
-        if request.method == "POST" and request.url.path == "/v2/dimension":
+        if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionName":
             return httpx.Response(200, json={"value": {"id": 8001}})
 
-        if request.method == "POST" and request.url.path == "/v2/dimension/value":
+        if request.method == "POST" and request.url.path == "/v2/ledger/accountingDimensionValue":
             return httpx.Response(200, json={"value": {"id": 8101}})
 
         return httpx.Response(404, json={"error": {"message": "not found"}})

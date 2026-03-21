@@ -163,6 +163,6 @@ def test_solve_order_then_invoice_payment_reuses_existing_order() -> None:
     assert recorded["invoice_payload"]["orders"] == [{"id": 5001}]
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paidAmount"] == "1500.0"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "1500.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "1500.0"
     assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()

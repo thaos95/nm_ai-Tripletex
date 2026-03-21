@@ -67,12 +67,15 @@ def _today_iso() -> str:
 
 
 def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) -> Dict[str, Any]:
+    user_type = spec.get("userType", "STANDARD")
+    if isinstance(user_type, int):
+        user_type = {1: "STANDARD", 2: "EXTENDED", 3: "NO_ACCESS"}.get(user_type, "STANDARD")
     payload = {
         "firstName": spec.get("first_name"),
         "lastName": spec.get("last_name"),
         "email": spec.get("email"),
         "dateOfBirth": spec.get("birthDate"),
-        "userType": 1,
+        "userType": user_type,
         "department": {"id": department_id} if department_id is not None else None,
     }
     return _compact_payload(payload)
@@ -99,6 +102,7 @@ def _build_supplier_payload(spec: Dict[str, Any]) -> Dict[str, Any]:
         "name": spec.get("name"),
         "email": spec.get("email"),
         "organizationNumber": spec.get("organizationNumber"),
+        "isSupplier": True,
     }
     return _compact_payload(payload)
 
@@ -138,7 +142,7 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
     payload = {
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate"),
-        "creditNote": fields.get("creditNote"),
+        "isCreditNote": fields.get("creditNote") or fields.get("isCreditNote"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
     }
@@ -146,28 +150,32 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
 
 
 def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) -> Dict[str, Any]:
-    payload = {
+    header = _compact_payload({
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceNumber": fields.get("invoiceNumber"),
-        "supplier": {"id": supplier_id},
-        "amount": fields.get("amount"),
-        "invoiceLines": _build_supplier_invoice_lines(fields),
-    }
-    return _compact_payload(payload)
+        "vendorId": supplier_id,
+        "invoiceAmount": fields.get("amount"),
+        "dueDate": fields.get("invoiceDueDate"),
+        "description": fields.get("description"),
+    })
+    order_lines = _build_incoming_invoice_lines(fields)
+    payload: Dict[str, Any] = {"invoiceHeader": header}
+    if order_lines:
+        payload["orderLines"] = order_lines
+    return payload
 
 
-def _build_supplier_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
+def _build_incoming_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
     amount = fields.get("amount")
     account_number = fields.get("accountNumber")
-    vat_percentage = fields.get("vatPercentage")
-    if amount is None or account_number is None:
+    if amount is None:
         return None
-    line = {
-        "amount": amount,
-        "account": {"number": str(account_number)},
-    }
-    if vat_percentage is not None:
-        line["vatPercentage"] = vat_percentage
+    line: Dict[str, Any] = {"amountInclVat": amount}
+    if account_number is not None:
+        line["accountId"] = int(account_number)
+    description = fields.get("description") or fields.get("invoiceDescription")
+    if description:
+        line["description"] = description
     return [_compact_payload(line)]
 
 
@@ -190,7 +198,7 @@ def _build_minimal_invoice_payload(
     payload = {
         "invoiceDate": fields.get("invoiceDate"),
         "invoiceDueDate": fields.get("invoiceDueDate") if include_due_date else None,
-        "creditNote": fields.get("creditNote"),
+        "isCreditNote": fields.get("creditNote") or fields.get("isCreditNote"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
     }
@@ -198,10 +206,11 @@ def _build_minimal_invoice_payload(
 
 
 def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    paid_amount = fields.get("amountPaidCurrency") or fields.get("paidAmount") or fields.get("amount")
     payload = {
         "paymentDate": fields.get("paymentDate"),
-        "paidAmount": fields.get("amountPaidCurrency"),
-        "amountPaidCurrency": fields.get("amountPaidCurrency"),
+        "paidAmount": paid_amount,
+        "paidAmountCurrency": paid_amount,
         "paymentTypeId": fields.get("paymentTypeId", 6),
     }
     return _compact_payload(payload)
@@ -250,6 +259,21 @@ def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: Trip
     return classified.category == TripletexErrorCategory.VALIDATION_GENERIC
 
 
+def _build_travel_expense_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    travel_date = fields.get("expenseDate") or fields.get("date") or _today_iso()
+    payload["date"] = travel_date
+    if fields.get("title"):
+        payload["title"] = fields["title"]
+    if fields.get("amount") is not None:
+        payload["costs"] = [{"amount": fields["amount"], "date": travel_date}]
+    if fields.get("project"):
+        payload["project"] = fields["project"]
+    if fields.get("department"):
+        payload["department"] = fields["department"]
+    return _compact_payload(payload)
+
+
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     return _compact_payload({"dimensionName": fields.get("dimensionName")})
 
@@ -266,15 +290,15 @@ def _build_voucher_payload(
     dimension_value_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     debit_line: Dict[str, Any] = {
-        "account": {"number": account_number, "name": description},
+        "account": {"number": int(account_number)},
         "amount": abs(amount),
         "description": description,
     }
     if dimension_value_id is not None:
-        debit_line["dimensions"] = [{"id": dimension_value_id}]
+        debit_line["freeAccountingDimension1"] = {"id": dimension_value_id}
 
     credit_line: Dict[str, Any] = {
-        "account": {"number": "2400", "name": "Offset posting"},
+        "account": {"number": 2400},
         "amount": -abs(amount),
         "description": description,
     }
@@ -862,7 +886,7 @@ def _build_reverse_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
             request_id=None,
             validation_messages=["Payment amount is required for reversal."],
         )
-    payload.setdefault("amountPaidCurrency", payload["paidAmount"])
+    payload.setdefault("paidAmountCurrency", payload["paidAmount"])
     payload["reverse"] = "true"
     return payload
 
@@ -998,18 +1022,11 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if manager_spec:
             manager_id = _resolve_project_manager(client, manager_spec, operations)
-            if manager_id is not None:
-                payload["projectManager"] = {"id": manager_id}
-        try:
-            response = client.create_resource("project", _compact_payload(payload))
-        except TripletexClientError as exc:
-            if "prosjektleder" not in str(exc).lower():
-                raise
-            fallback_manager_id = _resolve_fallback_project_manager(client, operations)
-            if fallback_manager_id is None:
-                raise
-            payload["projectManager"] = {"id": fallback_manager_id}
-            response = client.create_resource("project", _compact_payload(payload))
+        else:
+            manager_id = _resolve_fallback_project_manager(client, operations)
+        if manager_id is not None:
+            payload["projectManager"] = {"id": manager_id}
+        response = client.create_resource("project", _compact_payload(payload))
         operations.append(OperationResult(name="create-project", resource_id=_extract_id(response), payload=response))
 
     elif task_type == TaskType.CREATE_DEPARTMENT:
@@ -1139,7 +1156,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         _validate_supplier_invoice_fields(fields)
         payload = _build_supplier_invoice_payload(fields, supplier_id)
         logger.info("supplier_invoice_payload=%s", json.dumps(payload, ensure_ascii=False, default=str))
-        response = client.create_resource("supplierInvoice", payload)
+        response = client.create_resource("incomingInvoice", payload)
         operations.append(
             OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
         )
@@ -1277,7 +1294,12 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
 
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
-        payload = dict(fields)
+        payload = _build_travel_expense_payload(fields)
+        employee_spec = related.get("employee")
+        if employee_spec:
+            employee_id = _resolve_employee(client, employee_spec, operations, allow_create=False)
+            if employee_id is not None:
+                payload["employee"] = {"id": employee_id}
         if "employee" not in payload:
             fallback_employee_id = _resolve_fallback_project_manager(client, operations)
             if fallback_employee_id is not None:
@@ -1337,5 +1359,29 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             count=fields.get("count", 100),
         )
         operations.append(OperationResult(name="list-ledger-postings", payload=response))
+
+    elif task_type == TaskType.REGISTER_PAYMENT:
+        customer_spec = related.get("customer", {})
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=False,
+        )
+        if customer_id is None:
+            raise TripletexClientError(message="Register payment requires resolvable customer")
+        invoice_id = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
+        if invoice_id is None:
+            raise TripletexClientError(message="Register payment requires resolvable invoice")
+        fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
+        if fields.get("amountPaidCurrency") is None and fields.get("amount") is not None:
+            fields["amountPaidCurrency"] = fields.get("amount")
+        payment_params = _build_invoice_payment_payload(fields)
+        response = client._request(
+            "PUT",
+            "/invoice/{0}/:payment".format(int(invoice_id)),
+            params=payment_params,
+        )
+        operations.append(OperationResult(name="register-payment", resource_id=invoice_id, payload=response))
 
     return ExecutionResult(task_type=task_type, operations=operations)

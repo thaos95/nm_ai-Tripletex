@@ -131,7 +131,7 @@ def test_payment_workflow_keeps_same_call_count_and_carries_payment_fields() -> 
     assert "markAsPaid" not in recorded["invoice_payload"]
     assert recorded["invoice_payment_payload"]["paymentDate"] is not None
     assert recorded["invoice_payment_payload"]["paidAmount"] == "32200.0"
-    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "32200.0"
+    assert recorded["invoice_payment_payload"]["paidAmountCurrency"] == "32200.0"
     assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     app.dependency_overrides.clear()
 

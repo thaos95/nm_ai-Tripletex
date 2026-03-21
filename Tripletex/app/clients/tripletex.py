@@ -20,6 +20,7 @@ ALLOWED_RESOURCES = {
     "travelExpense",
     "supplier",
     "supplierInvoice",
+    "incomingInvoice",
     "voucher",
     "bank",
     "currency",

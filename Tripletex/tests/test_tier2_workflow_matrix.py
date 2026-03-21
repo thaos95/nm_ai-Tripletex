@@ -134,12 +134,12 @@ def test_tier2_invoice_and_payment_workflow_matrix(
         assert "markAsPaid" not in recorded["invoice_payload"]
         assert recorded["invoice_payment_payload"]["paymentDate"] is not None
         assert recorded["invoice_payment_payload"]["paidAmount"] is not None
-        assert recorded["invoice_payment_payload"]["amountPaidCurrency"] is not None
+        assert recorded["invoice_payment_payload"]["paidAmountCurrency"] is not None
         assert recorded["invoice_payment_payload"]["paymentTypeId"] == "6"
     else:
         assert "markAsPaid" not in recorded["invoice_payload"]
         assert "paymentDate" not in recorded["invoice_payload"]
-        assert "amountPaidCurrency" not in recorded["invoice_payload"]
+        assert "paidAmountCurrency" not in recorded["invoice_payload"]
     app.dependency_overrides.clear()
 
 

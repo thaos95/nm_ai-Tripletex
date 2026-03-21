@@ -57,11 +57,15 @@ Use these task types exactly:
 - create_invoice
 - create_credit_note
 - create_project_billing
+- create_supplier_invoice
 - create_dimension_voucher
 - create_payroll_voucher
 - create_travel_expense
+- update_travel_expense
 - delete_travel_expense
 - delete_voucher
+- register_payment
+- reverse_payment
 - list_ledger_accounts
 - list_ledger_postings
 - unsupported
@@ -87,16 +91,16 @@ Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-e
 
 Examples:
 User: Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) på 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.
-Assistant: {"task_type":"create_invoice","confidence":0.95,"language_hint":"nb","fields_json":"{\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"amount\":26450.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Brattli AS\",\"organizationNumber\":\"845762686\",\"isCustomer\":true},\"invoice\":{\"description\":\"Skylagring\",\"amountExcludingVatCurrency\":26450.0},\"order\":{\"description\":\"Skylagring\"}}","attachments_required":false,"notes":[]}
+Assistant: {"task_type":"create_invoice","confidence":0.95,"language_hint":"nb","fields_json":"{\\"invoiceDate\\":\\"2026-03-20\\",\\"invoiceDueDate\\":\\"2026-03-20\\",\\"orderDate\\":\\"2026-03-20\\",\\"deliveryDate\\":\\"2026-03-20\\",\\"amount\\":26450.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Brattli AS\\",\\"organizationNumber\\":\\"845762686\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"Skylagring\\",\\"amountExcludingVatCurrency\\":26450.0},\\"order\\":{\\"description\\":\\"Skylagring\\"}}","attachments_required":false,"notes":[]}
 
 User: The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.
-Assistant: {"task_type":"create_invoice","confidence":0.94,"language_hint":"en","fields_json":"{\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"amount\":32200.0,\"markAsPaid\":true,\"paymentDate\":\"2026-03-20\",\"amountPaidCurrency\":32200.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Windmill Ltd\",\"organizationNumber\":\"830362894\",\"isCustomer\":true},\"invoice\":{\"description\":\"System Development\",\"amountExcludingVatCurrency\":32200.0},\"order\":{\"description\":\"System Development\"}}","attachments_required":false,"notes":[]}
+Assistant: {"task_type":"register_payment","confidence":0.94,"language_hint":"en","fields_json":"{\\"paymentDate\\":\\"2026-03-20\\",\\"amount\\":32200.0,\\"amountPaidCurrency\\":32200.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Windmill Ltd\\",\\"organizationNumber\\":\\"830362894\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"System Development\\",\\"amountExcludingVatCurrency\\":32200.0}}","attachments_required":false,"notes":[]}
 
 User: Crie o projeto "Implementacao Rio" vinculado ao cliente Rio Azul Lda (org. no 827937223). O gerente de projeto e Goncalo Oliveira (goncalo.oliveira@example.org).
-Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt","fields_json":"{\"name\":\"Implementacao Rio\",\"startDate\":\"2026-03-20\"}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Rio Azul Lda\",\"organizationNumber\":\"827937223\",\"isCustomer\":true},\"project_manager\":{\"first_name\":\"Goncalo\",\"last_name\":\"Oliveira\",\"email\":\"goncalo.oliveira@example.org\"}}","attachments_required":false,"notes":[]}
+Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt","fields_json":"{\\"name\\":\\"Implementacao Rio\\",\\"startDate\\":\\"2026-03-20\\"}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Rio Azul Lda\\",\\"organizationNumber\\":\\"827937223\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Goncalo\\",\\"last_name\\":\\"Oliveira\\",\\"email\\":\\"goncalo.oliveira@example.org\\"}}","attachments_required":false,"notes":[]}
 
 User: Sett fastpris 203000 kr på prosjektet "Digital transformasjon" for Stormberg AS (org.nr 834028719). Prosjektleder er Hilde Hansen (hilde.hansen@example.org). Fakturer kunden for 75 % av fastprisen som en delbetaling.
-Assistant: {"task_type":"create_project_billing","confidence":0.93,"language_hint":"nb","fields_json":"{\"name\":\"Digital transformasjon\",\"startDate\":\"2026-03-20\",\"invoiceDate\":\"2026-03-20\",\"invoiceDueDate\":\"2026-03-20\",\"orderDate\":\"2026-03-20\",\"deliveryDate\":\"2026-03-20\",\"fixedPriceAmountCurrency\":203000.0,\"billingPercentage\":75.0,\"amount\":152250.0}","match_fields_json":"{}","related_entities_json":"{\"customer\":{\"name\":\"Stormberg AS\",\"organizationNumber\":\"834028719\",\"isCustomer\":true},\"project_manager\":{\"first_name\":\"Hilde\",\"last_name\":\"Hansen\",\"email\":\"hilde.hansen@example.org\"},\"invoice\":{\"description\":\"Partial billing 75% of fixed price\",\"amountExcludingVatCurrency\":152250.0},\"order\":{\"description\":\"Partial billing 75% of fixed price\"}}","attachments_required":false,"notes":[]}
+Assistant: {"task_type":"create_project_billing","confidence":0.93,"language_hint":"nb","fields_json":"{\\"name\\":\\"Digital transformasjon\\",\\"startDate\\":\\"2026-03-20\\",\\"invoiceDate\\":\\"2026-03-20\\",\\"invoiceDueDate\\":\\"2026-03-20\\",\\"orderDate\\":\\"2026-03-20\\",\\"deliveryDate\\":\\"2026-03-20\\",\\"fixedPriceAmountCurrency\\":203000.0,\\"billingPercentage\\":75.0,\\"amount\\":152250.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Stormberg AS\\",\\"organizationNumber\\":\\"834028719\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Hilde\\",\\"last_name\\":\\"Hansen\\",\\"email\\":\\"hilde.hansen@example.org\\"},\\"invoice\\":{\\"description\\":\\"Partial billing 75% of fixed price\\",\\"amountExcludingVatCurrency\\":152250.0},\\"order\\":{\\"description\\":\\"Partial billing 75% of fixed price\\"}}","attachments_required":false,"notes":[]}
 """
 
 
@@ -131,7 +135,116 @@ def _safe_json_mapping(raw: str) -> Dict[str, Any]:
         return json.loads(raw, strict=False)
 
 
-def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
+def _build_parsed_task(parsed: Dict[str, Any]) -> ParsedTask:
+    fields = _sanitize_scalar_mapping(_safe_json_mapping(parsed["fields_json"]))
+    match_fields_raw = _safe_json_mapping(parsed["match_fields_json"])
+    related_entities = _sanitize_related_mapping(_safe_json_mapping(parsed["related_entities_json"]))
+    match_fields = _sanitize_scalar_mapping(match_fields_raw)
+    notes = list(parsed.get("notes", []))
+    if isinstance(match_fields_raw, dict):
+        for key, value in match_fields_raw.items():
+            if isinstance(value, dict):
+                nested = _sanitize_scalar_mapping(value)
+                if nested:
+                    existing = related_entities.get(str(key), {})
+                    existing.update(nested)
+                    related_entities[str(key)] = existing
+                    notes.append("Moved nested match_fields.{0} into related_entities".format(key))
+    return ParsedTask(
+        task_type=TaskType(parsed["task_type"]),
+        confidence=float(parsed["confidence"]),
+        language_hint=str(parsed["language_hint"]),
+        fields=fields,
+        match_fields=match_fields,
+        related_entities=related_entities,
+        attachments_required=bool(parsed.get("attachments_required", False)),
+        notes=notes,
+    )
+
+
+def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    text = text.strip()
+    if text.startswith("{"):
+        return json.loads(text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start : end + 1])
+    return None
+
+
+def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
+    if not settings.replicate_api_token:
+        return None
+
+    messages = "{system}\n\nUser: {user}\nAssistant:".format(
+        system=SYSTEM_PROMPT,
+        user=prompt,
+    )
+
+    payload = {
+        "input": {
+            "prompt": messages,
+            "max_tokens": 2000,
+            "temperature": 0.1,
+        },
+    }
+
+    headers = {
+        "Authorization": "Bearer {0}".format(settings.replicate_api_token),
+        "Content-Type": "application/json",
+        "Prefer": "wait",
+    }
+
+    model = settings.replicate_model
+    url = "https://api.replicate.com/v1/models/{0}/predictions".format(model)
+
+    try:
+        response = httpx.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=60.0,
+            trust_env=False,
+        )
+        if response.is_error:
+            logger.error(
+                "replicate_parse_failed status=%s body=%r model=%s",
+                response.status_code,
+                response.text[:4000],
+                model,
+            )
+            return None
+
+        data = response.json()
+        output = data.get("output")
+        if output is None:
+            logger.warning("replicate_no_output data_keys=%s", list(data.keys()))
+            return None
+
+        if isinstance(output, list):
+            output_text = "".join(str(chunk) for chunk in output)
+        elif isinstance(output, str):
+            output_text = output
+        else:
+            logger.warning("replicate_unexpected_output_type type=%s", type(output).__name__)
+            return None
+
+        if not output_text.strip():
+            return None
+
+        parsed = _extract_json_from_text(output_text)
+        if parsed is None:
+            logger.warning("replicate_no_json_found output=%r", output_text[:500])
+            return None
+
+        return _build_parsed_task(parsed)
+    except Exception:
+        logger.exception("replicate_parse_exception model=%s", model)
+        return None
+
+
+def _parse_prompt_with_openai(prompt: str) -> Optional[ParsedTask]:
     if not settings.openai_api_key:
         return None
 
@@ -185,30 +298,21 @@ def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
         if not output_text:
             return None
         parsed = json.loads(output_text)
-        fields = _sanitize_scalar_mapping(_safe_json_mapping(parsed["fields_json"]))
-        match_fields_raw = _safe_json_mapping(parsed["match_fields_json"])
-        related_entities = _sanitize_related_mapping(_safe_json_mapping(parsed["related_entities_json"]))
-        match_fields = _sanitize_scalar_mapping(match_fields_raw)
-        notes = list(parsed["notes"])
-        if isinstance(match_fields_raw, dict):
-            for key, value in match_fields_raw.items():
-                if isinstance(value, dict):
-                    nested = _sanitize_scalar_mapping(value)
-                    if nested:
-                        existing = related_entities.get(str(key), {})
-                        existing.update(nested)
-                        related_entities[str(key)] = existing
-                        notes.append("Moved nested match_fields.{0} into related_entities".format(key))
-        return ParsedTask(
-            task_type=TaskType(parsed["task_type"]),
-            confidence=float(parsed["confidence"]),
-            language_hint=str(parsed["language_hint"]),
-            fields=fields,
-            match_fields=match_fields,
-            related_entities=related_entities,
-            attachments_required=bool(parsed["attachments_required"]),
-            notes=notes,
-        )
+        return _build_parsed_task(parsed)
     except Exception:
         logger.exception("openai_parse_exception model=%s", settings.openai_model)
         return None
+
+
+def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
+    result = _parse_prompt_with_replicate(prompt)
+    if result is not None:
+        logger.info("replicate_parse_success task_type=%s confidence=%.2f", result.task_type, result.confidence)
+        return result
+
+    result = _parse_prompt_with_openai(prompt)
+    if result is not None:
+        logger.info("openai_parse_success task_type=%s confidence=%.2f", result.task_type, result.confidence)
+        return result
+
+    return None

@@ -19,7 +19,7 @@ def test_invoice_contract_omits_send_by_email() -> None:
             "sendByEmail": True,
             "markAsPaid": True,
             "paymentDate": "2026-03-20",
-            "amountPaidCurrency": 32200.0,
+            "paidAmountCurrency": 32200.0,
         },
         customer_id=1,
         order_id=2,
@@ -29,7 +29,7 @@ def test_invoice_contract_omits_send_by_email() -> None:
     assert payload["orders"] == [{"id": 2}]
     assert "markAsPaid" not in payload
     assert "paymentDate" not in payload
-    assert "amountPaidCurrency" not in payload
+    assert "paidAmountCurrency" not in payload
     assert "sendByEmail" not in payload
 
 
