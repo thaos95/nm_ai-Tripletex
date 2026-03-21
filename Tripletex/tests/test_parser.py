@@ -235,8 +235,8 @@ def test_parse_payment_reversal_prompt_is_blocked_as_unsupported() -> None:
     parsed = parse_prompt(
         'Betalinga frÃ¥ Strandvik AS (org.nr 859256333) for fakturaen "Nettverksteneste" (41550 kr ekskl. MVA) vart returnert av banken. Reverser betalinga slik at fakturaen igjen viser utestÃ¥ande belÃ¸p.'
     )
-    assert parsed.task_type == TaskType.UNSUPPORTED
-    assert any("payment reversal" in note.lower() for note in parsed.notes)
+    assert parsed.task_type == TaskType.REVERSE_PAYMENT
+    assert any("reverses an existing invoice payment" in note.lower() for note in parsed.notes)
 
 
 def test_parse_multiline_order_invoice_prompt_collects_all_order_lines() -> None:

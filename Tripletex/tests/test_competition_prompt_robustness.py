@@ -64,7 +64,8 @@ def test_competition_prompt_robustness_parsing(prompt: str, expected_task: TaskT
 def test_competition_prompt_robustness_payment_variants(prompt: str, expected_description: str) -> None:
     validated = validate_and_normalize_task(parse_prompt(prompt))
     if "reverser betalinga" in prompt:
-        assert validated.parsed_task.task_type == TaskType.UNSUPPORTED
+        assert validated.parsed_task.task_type == TaskType.REVERSE_PAYMENT
+        assert validated.parsed_task.related_entities["invoice"]["description"] == expected_description
     else:
         assert validated.parsed_task.task_type == TaskType.CREATE_INVOICE
         assert validated.parsed_task.related_entities["invoice"]["description"] == expected_description

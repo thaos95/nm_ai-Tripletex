@@ -1059,12 +1059,30 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     if "kontoplan" in lowered or "ledger account" in lowered or "chart of accounts" in lowered:
         entity = "ledger_account"
     if not supplier_detected and payment_reversal_detected and invoice_context_detected:
+        payment_fields = dict(fields)
+        payment_fields["invoiceDate"] = payment_fields.get("date") or _today_iso()
+        payment_fields["invoiceDueDate"] = payment_fields["invoiceDate"]
+        payment_fields["orderDate"] = payment_fields["invoiceDate"]
+        payment_fields["deliveryDate"] = payment_fields["invoiceDate"]
+        payment_fields["paymentDate"] = payment_fields["invoiceDate"]
+        related_entities = _extract_invoice_entities(prompt)
+        description = _extract_invoice_description(prompt)
+        if not description:
+            description = _extract_invoice_description_fallback(prompt)
+        if description:
+            related_entities.setdefault("invoice", {})["description"] = description
+            related_entities.setdefault("order", {})["description"] = description
+        amount = _extract_amount(prompt)
+        if amount is not None:
+            payment_fields["amount"] = amount
+            related_entities.setdefault("invoice", {})["amountExcludingVatCurrency"] = amount
         return ParsedTask(
-            task_type=TaskType.UNSUPPORTED,
-            confidence=0.95,
+            task_type=TaskType.REVERSE_PAYMENT,
+            confidence=0.8,
             language_hint=_language_hint(prompt),
-            fields=fields,
-            notes=["Payment reversal is not supported safely with the current Tripletex contract."],
+            fields=payment_fields,
+            related_entities=related_entities,
+            notes=["Reverses an existing invoice payment."],
         )
     if not supplier_detected and (payment_detected or payment_reversal_detected) and invoice_context_detected:
         entity = "invoice"
@@ -1739,6 +1757,8 @@ def parse_prompt(prompt: str) -> ParsedTask:
     if rule_based.task_type == TaskType.CREATE_PROJECT_BILLING and rule_based.confidence >= 0.78:
         return rule_based
     if rule_based.task_type == TaskType.CREATE_PAYROLL_VOUCHER and rule_based.confidence >= 0.7:
+        return rule_based
+    if rule_based.task_type == TaskType.REVERSE_PAYMENT and rule_based.confidence >= 0.75:
         return rule_based
 
     llm_parsed = parse_prompt_with_llm(prompt)

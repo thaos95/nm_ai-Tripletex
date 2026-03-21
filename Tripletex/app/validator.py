@@ -267,6 +267,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.DELETE_VOUCHER: {"voucher_id"},
         TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
         TaskType.LIST_LEDGER_POSTINGS: {"fields", "count", "period_hint"},
+        TaskType.REVERSE_PAYMENT: {"invoiceDate", "invoiceDueDate", "orderDate", "amount", "paymentDate"},
     }
     warnings.extend(_drop_unknown_fields(normalized, allowed_fields))
 
@@ -361,6 +362,24 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         normalized.fields["creditNote"] = True
         if normalized.fields.get("amount") is not None:
             normalized.fields["amount"] = -abs(float(normalized.fields["amount"]))
+
+    if normalized.task_type == TaskType.REVERSE_PAYMENT:
+        invoice = normalized.related_entities.setdefault("invoice", {})
+        order = normalized.related_entities.get("order", {})
+        description = invoice.get("description") or order.get("description")
+        if "customer" not in normalized.related_entities:
+            return ValidationResult(
+                normalized,
+                blocking_error="Payment reversal requires customer reference",
+            )
+        if not description and normalized.fields.get("amount") is None:
+            return ValidationResult(
+                normalized,
+                blocking_error="Payment reversal requires invoice reference or amount",
+            )
+        if description:
+            invoice["description"] = description
+        invoice.setdefault("amountExcludingVatCurrency", normalized.fields.get("amount"))
 
     if normalized.task_type == TaskType.CREATE_DIMENSION_VOUCHER:
         if not normalized.fields.get("dimensionName"):

@@ -137,6 +137,22 @@ def recording_transport(recorded: dict) -> httpx.MockTransport:
         if request.method == "GET" and request.url.path == "/v2/product":
             return httpx.Response(200, json={"values": []})
 
+        if request.method == "GET" and request.url.path == "/v2/invoice":
+            return httpx.Response(
+                200,
+                json={
+                    "values": [
+                        {
+                            "id": 6001,
+                            "description": "Nettverksteneste",
+                            "invoiceDate": "2026-03-21",
+                            "customer": {"id": 2001},
+                            "amountExcludingVatCurrency": 41550.0,
+                        }
+                    ]
+                },
+            )
+
         if request.method == "POST" and request.url.path == "/v2/customer":
             recorded["customer_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(200, json={"value": {"id": 2001}})
@@ -852,10 +868,9 @@ def test_solve_payment_reversal_prompt_is_blocked_as_unsupported() -> None:
             "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
         },
     )
-    assert response.status_code == 502
-    assert "unsupported task" in response.json()["detail"].lower()
-    assert "order_payload" not in recorded
-    assert "invoice_payload" not in recorded
+    assert response.status_code == 200
+    assert recorded["invoice_payment_payload"]["reverse"] == "true"
+    assert recorded["invoice_payment_payload"]["amountPaidCurrency"] == "41550.0"
     app.dependency_overrides.clear()
 
 

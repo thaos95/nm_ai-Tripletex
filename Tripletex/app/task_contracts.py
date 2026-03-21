@@ -97,6 +97,13 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
         recoverable_errors=[TripletexErrorCategory.NO_RESULTS],
         terminal_errors=[TripletexErrorCategory.UNAUTHORIZED, TripletexErrorCategory.WRONG_ENDPOINT],
     ),
+    TaskType.REVERSE_PAYMENT: TaskContract(
+        task_type=TaskType.REVERSE_PAYMENT,
+        allowed_endpoints=["/customer", "/invoice"],
+        prerequisites=["customer", "invoice reference"],
+        recoverable_errors=[TripletexErrorCategory.NO_RESULTS, TripletexErrorCategory.VALIDATION_GENERIC],
+        terminal_errors=[TripletexErrorCategory.UNAUTHORIZED, TripletexErrorCategory.WRONG_ENDPOINT],
+    ),
     TaskType.DELETE_VOUCHER: TaskContract(
         task_type=TaskType.DELETE_VOUCHER,
         allowed_endpoints=["/ledger/voucher"],

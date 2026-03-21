@@ -30,6 +30,7 @@ class TaskType(str, Enum):
     UPDATE_TRAVEL_EXPENSE = "update_travel_expense"
     DELETE_TRAVEL_EXPENSE = "delete_travel_expense"
     DELETE_VOUCHER = "delete_voucher"
+    REVERSE_PAYMENT = "reverse_payment"
     LIST_LEDGER_ACCOUNTS = "list_ledger_accounts"
     LIST_LEDGER_POSTINGS = "list_ledger_postings"
     UNSUPPORTED = "unsupported"

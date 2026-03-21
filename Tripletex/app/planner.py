@@ -77,6 +77,14 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
                 PlannedStep(name="create-supplier-invoice", resource="supplierInvoice", action="create"),
             ]
         )
+    elif task_type == TaskType.REVERSE_PAYMENT:
+        steps.extend(
+            [
+                PlannedStep(name="resolve-payment-customer", resource="customer", action="resolve"),
+                PlannedStep(name="resolve-payment-invoice", resource="invoice", action="resolve"),
+                PlannedStep(name="reverse-invoice-payment", resource="invoice", action="update"),
+            ]
+        )
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         steps.extend(
             [

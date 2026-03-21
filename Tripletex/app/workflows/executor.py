@@ -580,14 +580,24 @@ def _resolve_credit_note_invoice(
             invoice_date_from = (date.fromisoformat(str(invoice_date_to)) - timedelta(days=3650)).isoformat()
         except ValueError:
             invoice_date_from = "2016-01-01"
-    response = client.list_resource(
-        "invoice",
-        fields="*",
-        count=200,
-        customerId=customer_id,
-        invoiceDateFrom=invoice_date_from,
-        invoiceDateTo=invoice_date_to,
-    )
+    try:
+        response = client.list_resource(
+            "invoice",
+            fields="*",
+            count=200,
+            customerId=customer_id,
+            invoiceDateFrom=invoice_date_from,
+            invoiceDateTo=invoice_date_to,
+        )
+    except TripletexClientError as exc:
+        operations.append(
+            OperationResult(
+                name="resolve-payment-invoice",
+                resource_id=None,
+                payload={"error": str(exc)},
+            )
+        )
+        return None
     values = response.get("values", [])
 
     def _candidate_customer_id(candidate: Dict[str, Any]) -> Optional[int]:
@@ -642,6 +652,117 @@ def _resolve_credit_note_invoice(
         )
     )
     return int(invoice_id) if invoice_id is not None else None
+
+
+def _resolve_invoice_for_payment_reversal(
+    client: TripletexClient,
+    customer_id: int,
+    fields: Dict[str, Any],
+    related: Dict[str, Any],
+    operations: list,
+) -> Optional[int]:
+    invoice_description = (
+        related.get("invoice", {}).get("description")
+        or related.get("order", {}).get("description")
+        or related.get("product", {}).get("description")
+    )
+    target_amount = fields.get("amount")
+    invoice_date_to = fields.get("invoiceDate") or _today_iso()
+    invoice_date_from = fields.get("invoiceDateFrom")
+    if invoice_date_from is None:
+        try:
+            invoice_date_from = (date.fromisoformat(str(invoice_date_to)) - timedelta(days=3650)).isoformat()
+        except ValueError:
+            invoice_date_from = "2016-01-01"
+    response = client.list_resource(
+        "invoice",
+        fields="*",
+        count=200,
+        customerId=customer_id,
+        invoiceDateFrom=invoice_date_from,
+        invoiceDateTo=invoice_date_to,
+    )
+    values = response.get("values", [])
+
+    def _candidate_customer_id(candidate: Dict[str, Any]) -> Optional[int]:
+        customer = candidate.get("customer")
+        if isinstance(customer, dict):
+            return customer.get("id")
+        return None
+
+    def _candidate_description(candidate: Dict[str, Any]) -> str:
+        for key in ("description", "invoiceText", "comment"):
+            value = candidate.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    def _candidate_amount(candidate: Dict[str, Any]) -> Optional[float]:
+        for key in ("amountExcludingVatCurrency", "amount", "netAmount"):
+            value = candidate.get(key)
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    filtered = [
+        candidate
+        for candidate in values
+        if _candidate_customer_id(candidate) in {None, customer_id}
+    ]
+    if invoice_description:
+        desc_norm = str(invoice_description).strip().lower()
+        filtered = [
+            candidate
+            for candidate in filtered
+            if desc_norm in _candidate_description(candidate).strip().lower()
+        ] or filtered
+    if target_amount is not None:
+        filtered = [
+            candidate
+            for candidate in filtered
+            if _candidate_amount(candidate) == target_amount
+        ] or filtered
+
+    invoice = filtered[0] if filtered else None
+    invoice_id = invoice.get("id") if invoice else None
+    operations.append(
+        OperationResult(
+            name="resolve-payment-invoice",
+            resource_id=invoice_id,
+            payload={"invoice": invoice, "matched_count": len(filtered)},
+        )
+    )
+    return int(invoice_id) if invoice_id is not None else None
+
+
+def _reverse_invoice_payment(client: TripletexClient, invoice_id: int, fields: Dict[str, Any], operations: list) -> None:
+    params = {"reverse": "true"}
+    payment_date = fields.get("paymentDate")
+    if payment_date:
+        params["paymentDate"] = payment_date
+    if fields.get("amount"):
+        params["amountPaidCurrency"] = fields.get("amount")
+    try:
+        response = client._request("PUT", "/invoice/{0}/:payment".format(int(invoice_id)), params=params)
+    except TripletexClientError as exc:
+        classified = classify_tripletex_error(exc)
+        if exc.status_code == 404 and classified.category in {
+            TripletexErrorCategory.NOT_FOUND,
+            TripletexErrorCategory.WRONG_ENDPOINT,
+        }:
+            operations.append(
+                OperationResult(
+                    name="reverse-invoice-payment",
+                    resource_id=invoice_id,
+                    payload={"skipped": True, "reason": "invoice not available for payment reversal"},
+                )
+            )
+            return
+        raise
+    operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
 
 
 def _create_credit_note(
@@ -876,6 +997,21 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(
             OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
         )
+
+    elif task_type == TaskType.REVERSE_PAYMENT:
+        customer_spec = related.get("customer", {})
+        customer_id = _resolve_customer(
+            client,
+            customer_spec,
+            operations,
+            allow_create=False,
+        )
+        if customer_id is None:
+            raise TripletexClientError(message="Reverse payment requires resolvable customer")
+        invoice_id = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
+        if invoice_id is None:
+            raise TripletexClientError(message="Reverse payment requires resolvable invoice")
+        _reverse_invoice_payment(client, invoice_id, fields, operations)
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
