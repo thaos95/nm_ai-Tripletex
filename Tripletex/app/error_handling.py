@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union
+from typing import Optional, Union
+import json
+import re
 
 
 class TripletexErrorCategory(str, Enum):
@@ -11,6 +13,7 @@ class TripletexErrorCategory(str, Enum):
     VALIDATION_GENERIC = "validation_generic"
     NO_RESULTS = "no_results"
     NOT_FOUND = "not_found"
+    SERVER_ERROR = "server_error"
     TIMEOUT = "timeout"
     UNKNOWN = "unknown"
 
@@ -27,6 +30,24 @@ def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> Classif
     status_code = getattr(exc, "status_code", None)
     raw_message = getattr(exc, "response_text", None) or str(exc)
     message = (raw_message or "").lower()
+
+    def request_id() -> Optional[str]:
+        if not raw_message:
+            return None
+        try:
+            data = json.loads(raw_message)
+            return data.get("requestId")
+        except ValueError:
+            match = re.search(r'"requestId"\s*:\s*"([^"]+)"', raw_message)
+            if match:
+                return match.group(1)
+        return None
+
+    def server_summary() -> str:
+        request_id_value = request_id()
+        if request_id_value:
+            return f"Tripletex service error (requestId {request_id_value}). Retry later."
+        return "Tripletex service error. Please try again later."
 
     def is_proxy_blocked() -> bool:
         return "proxy token" in message or "proxy-token" in message
@@ -65,6 +86,14 @@ def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> Classif
             category=TripletexErrorCategory.UNKNOWN,
             recoverable=False,
             summary="Access was forbidden by Tripletex.",
+            raw_message=raw_message,
+        )
+
+    if status_code and 500 <= status_code < 600:
+        return ClassifiedTripletexError(
+            category=TripletexErrorCategory.SERVER_ERROR,
+            recoverable=True,
+            summary=server_summary(),
             raw_message=raw_message,
         )
 

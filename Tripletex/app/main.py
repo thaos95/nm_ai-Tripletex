@@ -249,6 +249,8 @@ def solve(
             TripletexErrorCategory.WRONG_ENDPOINT,
         }:
             return SolveResponse()
+        if classified.category == TripletexErrorCategory.SERVER_ERROR:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=classified.summary)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=classified.summary)
     finally:
         client.close()
