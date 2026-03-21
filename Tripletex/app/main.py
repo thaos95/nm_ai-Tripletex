@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.attachment_parser import parse_attachments
 from app.clients.tripletex import TripletexClient
+from app.errors import MissingPrerequisiteError, UnsupportedTaskError
 from app.executor import execute_plan
 from app.planner import create_plan
 from app.schemas import SolveRequest, SolveResponse
@@ -24,6 +25,8 @@ async def solve(request: SolveRequest) -> SolveResponse:
     )
     attachments = parse_attachments(request.files)
     plan = create_plan(request, attachments=attachments)
+    if plan.task_type == "unsupported":
+        raise UnsupportedTaskError(request.prompt)
     client = TripletexClient(
         base_url=str(request.tripletex_credentials.base_url),
         session_token=request.tripletex_credentials.session_token,
@@ -38,6 +41,18 @@ async def solve(request: SolveRequest) -> SolveResponse:
         client.close()
     LOGGER.info("Completed plan=%s handler_result=%s", plan.model_dump(), result)
     return SolveResponse(status="completed", plan=plan)
+
+
+@app.exception_handler(UnsupportedTaskError)
+async def _handle_unsupported(request: Request, exc: UnsupportedTaskError) -> JSONResponse:
+    LOGGER.warning("Unsupported prompt: %s", exc)
+    return JSONResponse(content={"detail": str(exc)}, status_code=400)
+
+
+@app.exception_handler(MissingPrerequisiteError)
+async def _handle_missing_prerequisite(request: Request, exc: MissingPrerequisiteError) -> JSONResponse:
+    LOGGER.warning("Missing prerequisite %s: %s", exc.issue, exc.detail)
+    return JSONResponse(content={"detail": exc.detail}, status_code=422)
 
 
 @app.exception_handler(Exception)
