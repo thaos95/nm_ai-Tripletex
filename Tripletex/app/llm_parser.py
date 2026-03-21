@@ -39,36 +39,37 @@ TASK_SCHEMA = {
 
 SYSTEM_PROMPT = """You classify Tripletex accounting tasks into a fixed schema.
 Return only structured JSON.
-Prefer the closest supported task type over unsupported when the intent is reasonably clear.
+IMPORTANT: Almost every prompt maps to a supported task type. Only use "unsupported" for tasks that truly cannot map to any type below.
 Do not invent fields, entities, IDs, or prerequisites that are not grounded in the prompt.
 Prefer conservative extraction over speculative extraction.
 When a prompt implies a prerequisite-aware workflow, choose the final supported task and include enough related_entities for the deterministic executor to create prerequisites.
-Use these task types exactly:
-- create_employee
-- update_employee
-- list_employees
-- create_customer
-- update_customer
-- search_customers
-- create_product
-- create_project
-- create_department
-- create_order
-- create_invoice
-- create_credit_note
-- create_project_billing
-- create_supplier_invoice
-- create_dimension_voucher
-- create_payroll_voucher
-- create_travel_expense
-- update_travel_expense
-- delete_travel_expense
-- delete_voucher
-- register_payment
-- reverse_payment
-- list_ledger_accounts
-- list_ledger_postings
-- unsupported
+
+Task types and what maps to them:
+- create_employee: hire, add staff, register employee, new worker
+- update_employee: change employee details, update address/phone/email
+- list_employees: show employees, list staff
+- create_customer: new customer, add client, register company as customer
+- update_customer: change customer details
+- search_customers: find customer, look up client
+- create_product: new product, add item/service
+- create_project: new project, set up project
+- create_department: new department, add division
+- create_order: new order, purchase order
+- create_invoice: send invoice, bill customer, faktura, factura, Rechnung
+- create_credit_note: credit note, kreditnota, refund invoice
+- create_project_billing: bill project, project invoice with fixed price, fastpris
+- create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura
+- create_dimension_voucher: journal entry, accrual, periodization, month-end closing, year-end adjustment, move costs between accounts, bilagføring, periodisering, månedsavslutning, kontering, Buchung
+- create_payroll_voucher: salary payment, payroll entry, lønnsbilag, lønnskjøring
+- create_travel_expense: travel claim, reiseregning, expense report, Reisekostenabrechnung
+- update_travel_expense: modify existing travel expense
+- delete_travel_expense: remove travel expense
+- delete_voucher: delete/remove voucher or journal entry
+- register_payment: record payment received on invoice, mark invoice as paid, registrer betaling
+- reverse_payment: undo/reverse a payment, tilbakefør betaling
+- list_ledger_accounts: show chart of accounts, list accounts, kontoplan
+- list_ledger_postings: show ledger entries, list postings, hovedbok
+- unsupported: ONLY for tasks that truly cannot map to any type above (e.g. bank reconciliation, tax filing, Altinn reporting)
 
 Map natural language from Norwegian, English, Spanish, Portuguese, Nynorsk, German, or French.
 Use Tripletex-style field names in fields when known, for example:
@@ -76,7 +77,7 @@ Use Tripletex-style field names in fields when known, for example:
 - phoneNumberMobile, phoneNumber
 - priceExcludingVatCurrency
 - invoiceDate, invoiceDueDate, orderDate, deliveryDate
-- date, amount, description
+- date, amount, description, accountNumber, debitAccountNumber, creditAccountNumber
 - travel_expense_id, voucher_id
 
 For related_entities, use nested objects like:
@@ -84,17 +85,17 @@ For related_entities, use nested objects like:
   "customer": {"name": "Acme AS", "email": "x@example.org", "isCustomer": true},
   "product": {"name": "Consulting", "priceExcludingVatCurrency": 1500}
 }
-Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-encoded strings, for example:
-- fields_json = "{\"name\":\"Acme AS\",\"isCustomer\":true}"
-- match_fields_json = "{}"
-- related_entities_json = "{\"customer\":{\"name\":\"Acme AS\",\"isCustomer\":true}}"
+Return `fields_json`, `match_fields_json`, and `related_entities_json` as JSON-encoded strings.
 
 Examples:
 User: Opprett og send en faktura til kunden Brattli AS (org.nr 845762686) på 26450 kr eksklusiv MVA. Fakturaen gjelder Skylagring.
 Assistant: {"task_type":"create_invoice","confidence":0.95,"language_hint":"nb","fields_json":"{\\"invoiceDate\\":\\"2026-03-20\\",\\"invoiceDueDate\\":\\"2026-03-20\\",\\"orderDate\\":\\"2026-03-20\\",\\"deliveryDate\\":\\"2026-03-20\\",\\"amount\\":26450.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Brattli AS\\",\\"organizationNumber\\":\\"845762686\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"Skylagring\\",\\"amountExcludingVatCurrency\\":26450.0},\\"order\\":{\\"description\\":\\"Skylagring\\"}}","attachments_required":false,"notes":[]}
 
+User: Utfør månedsavslutning for mars 2026. Periodiser forskuddsbetalt kostnad (10150 kr per måned fra konto 1720 til kostnadskonto 6300).
+Assistant: {"task_type":"create_dimension_voucher","confidence":0.95,"language_hint":"nb","fields_json":"{\\"date\\":\\"2026-03-31\\",\\"amount\\":10150.0,\\"description\\":\\"Periodisering forskuddsbetalt kostnad mars 2026\\",\\"debitAccountNumber\\":\\"6300\\",\\"creditAccountNumber\\":\\"1720\\"}","match_fields_json":"{}","related_entities_json":"{}","attachments_required":false,"notes":[]}
+
 User: The customer Windmill Ltd (org no. 830362894) has an outstanding invoice for 32200 NOK excluding VAT for "System Development". Register full payment on this invoice.
-Assistant: {"task_type":"register_payment","confidence":0.94,"language_hint":"en","fields_json":"{\\"paymentDate\\":\\"2026-03-20\\",\\"amount\\":32200.0,\\"amountPaidCurrency\\":32200.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Windmill Ltd\\",\\"organizationNumber\\":\\"830362894\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"System Development\\",\\"amountExcludingVatCurrency\\":32200.0}}","attachments_required":false,"notes":[]}
+Assistant: {"task_type":"register_payment","confidence":0.94,"language_hint":"en","fields_json":"{\\"paymentDate\\":\\"2026-03-20\\",\\"amount\\":32200.0,\\"paidAmountCurrency\\":32200.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Windmill Ltd\\",\\"organizationNumber\\":\\"830362894\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"System Development\\",\\"amountExcludingVatCurrency\\":32200.0}}","attachments_required":false,"notes":[]}
 
 User: Crie o projeto "Implementacao Rio" vinculado ao cliente Rio Azul Lda (org. no 827937223). O gerente de projeto e Goncalo Oliveira (goncalo.oliveira@example.org).
 Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt","fields_json":"{\\"name\\":\\"Implementacao Rio\\",\\"startDate\\":\\"2026-03-20\\"}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Rio Azul Lda\\",\\"organizationNumber\\":\\"827937223\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Goncalo\\",\\"last_name\\":\\"Oliveira\\",\\"email\\":\\"goncalo.oliveira@example.org\\"}}","attachments_required":false,"notes":[]}
