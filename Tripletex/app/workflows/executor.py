@@ -1,13 +1,30 @@
 from datetime import date, datetime, timedelta
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
-from app.error_handling import TripletexErrorCategory, classify_tripletex_error
+from app.error_handling import (
+    TripletexErrorCategory,
+    classify_tripletex_error,
+    extract_tripletex_request_id,
+    extract_validation_messages,
+    is_company_bank_account_missing,
+)
 from app.logging_utils import get_logger
 from app.schemas import ExecutionPlan, ExecutionResult, OperationResult, TaskType
 
 logger = get_logger()
+
+
+class MissingPrerequisiteError(Exception):
+    def __init__(self, stage: str, task_type: TaskType, issue: str, payload: Dict[str, Any], request_id: Optional[str], validation_messages: List[str]):
+        super().__init__(f"{issue} missing prerequisite for {task_type}")
+        self.stage = stage
+        self.task_type = task_type
+        self.issue = issue
+        self.payload = payload
+        self.request_id = request_id
+        self.validation_messages = validation_messages
 
 
 def _extract_id(response: Dict[str, Any]) -> Optional[int]:
@@ -527,6 +544,7 @@ def _create_invoice_with_fallback(
     order_id: Optional[int],
     operations: list,
     *,
+    task_type: TaskType,
     operation_name: str,
     minimal_first: bool = False,
 ) -> Dict[str, Any]:
@@ -538,6 +556,27 @@ def _create_invoice_with_fallback(
     try:
         response = client.create_resource("invoice", payload)
     except TripletexClientError as exc:
+        if is_company_bank_account_missing(exc):
+            request_id = extract_tripletex_request_id(exc)
+            validation_messages = extract_validation_messages(exc)
+            logger.warning(
+                "company_bank_account_missing task_type=%s payload=%s requestId=%s validationMessages=%s",
+                operation_name,
+                json.dumps(payload, ensure_ascii=False, default=str),
+                request_id,
+                validation_messages,
+            )
+            resolved_task_type = task_type if isinstance(task_type, TaskType) else TaskType(task_type)
+            raise MissingPrerequisiteError(
+                stage="invoice_creation",
+                task_type=resolved_task_type,
+                issue="company_bank_account_required",
+                payload=payload,
+                request_id=request_id,
+                validation_messages=validation_messages,
+            )
+        if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
+            raise
         if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
             raise
         fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
@@ -1008,6 +1047,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id,
             order_id,
             operations,
+            task_type=task_type,
             operation_name="create-invoice",
         )
         _register_invoice_payment(client, _extract_id(invoice_response), fields, operations)
@@ -1103,6 +1143,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             customer_id,
             order_id,
             operations,
+            task_type=task_type,
             operation_name="create-billing-invoice",
         )
 

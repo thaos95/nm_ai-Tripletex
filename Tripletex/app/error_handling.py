@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Dict, List, Optional, Union
 import json
 import re
 
@@ -142,6 +142,44 @@ def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> Classif
         summary="Unclassified Tripletex error.",
         raw_message=raw_message,
     )
+
+
+def extract_tripletex_request_id(exc: "TripletexClientError") -> Optional[str]:
+    raw_message = getattr(exc, "response_text", None)
+    if not raw_message:
+        return None
+    try:
+        data = json.loads(raw_message)
+        return data.get("requestId")
+    except ValueError:
+        match = re.search(r'"requestId"\s*:\s*"([^"]+)"', raw_message)
+        if match:
+            return match.group(1)
+    return None
+
+
+def extract_validation_messages(exc: "TripletexClientError") -> List[str]:
+    raw_message = getattr(exc, "response_text", None)
+    if not raw_message:
+        return []
+    try:
+        data = json.loads(raw_message)
+        messages = [message.get("message") for message in data.get("validationMessages", []) if message.get("message")]
+        return messages
+    except ValueError:
+        return []
+
+
+def is_company_bank_account_missing(exc: "TripletexClientError") -> bool:
+    classified = classify_tripletex_error(exc)
+    if classified.category != TripletexErrorCategory.VALIDATION_PREREQUISITE:
+        return False
+    messages = extract_validation_messages(exc)
+    if any("bankkontonummer" in message.lower() for message in messages):
+        return True
+    if "bankkontonummer" in (classified.summary or "").lower():
+        return True
+    return False
 
 
 def explain_tripletex_error(raw_message: str) -> str:

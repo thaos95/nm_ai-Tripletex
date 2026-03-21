@@ -116,7 +116,11 @@ def test_create_invoice_does_not_retry_on_bank_account_validation_error() -> Non
         },
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 424
+    detail = response.json()["detail"]
+    assert detail["stage"] == "invoice_creation"
+    assert detail["issue"] == "company_bank_account_required"
+    assert detail["task_type"] == "create_invoice"
     assert recorded["calls"] == [
         "GET /v2/customer",
         "POST /v2/order",

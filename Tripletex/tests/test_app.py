@@ -1091,10 +1091,12 @@ def test_solve_maps_company_bank_account_error_precisely() -> None:
             "tripletex_credentials": {"base_url": "https://tx-proxy.ainm.no/v2", "session_token": "token"},
         },
     )
-    assert response.status_code == 502
-    detail = response.json()["detail"].lower()
-    assert "missing_prerequisite" in detail
-    assert "company_bank_account_missing" in detail
+    assert response.status_code == 424
+    detail = response.json()["detail"]
+    assert detail["stage"] == "invoice_creation"
+    assert detail["issue"] == "company_bank_account_required"
+    assert detail["task_type"] == "create_invoice"
+    assert "bankkontonummer" in detail["validationMessages"][0].lower()
     assert recorded["calls"] == ["GET /v2/customer", "POST /v2/order", "POST /v2/invoice"]
     app.dependency_overrides.clear()
 

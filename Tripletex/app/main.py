@@ -16,7 +16,7 @@ from app.schemas import InspectRequest, InspectResponse, SolveRequest, SolveResp
 from app.task_contracts import get_task_contract
 from app.validator import validate_and_normalize_task
 from app.workflow import build_workflow_plan, execute_workflow, parse_workflow
-from app.workflows.executor import execute_plan
+from app.workflows.executor import MissingPrerequisiteError, execute_plan
 
 logger = get_logger()
 app = FastAPI(title="Tripletex Agent", version="0.1.0")
@@ -226,6 +226,24 @@ def solve(
             result = execute_plan(client, plan)
         else:
             result = execute_workflow(client, tasks)
+    except MissingPrerequisiteError as exc:
+        logger.warning(
+            "missing_prerequisite task_type=%s issue=%s requestId=%s",
+            exc.task_type,
+            exc.issue,
+            exc.request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail={
+                "stage": exc.stage,
+                "task_type": exc.task_type.value,
+                "issue": exc.issue,
+                "requestId": exc.request_id,
+                "validationMessages": exc.validation_messages,
+                "payload": exc.payload,
+            },
+        )
     except ValueError as exc:
         logger.exception(
             "solve_failed_value_error task_type=%s prompt=%r",
