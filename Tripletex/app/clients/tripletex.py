@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 import logging
+import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -92,7 +94,6 @@ class TripletexClient:
         normalized_path = self._normalize_path(path)
         self._ensure_allowed(normalized_path)
 
-        print("TRIPLETEX REQUEST:", method, normalized_path, kwargs.get("json"))
         try:
             response = self._client.request(method, normalized_path, **kwargs)
         except httpx.HTTPError as exc:
@@ -137,6 +138,128 @@ class TripletexClient:
         first_segment = stripped.split("/", 1)[0].split(":", 1)[0]
         if first_segment not in ALLOWED_RESOURCES:
             raise TripletexClientError(message=f"Endpoint '{first_segment}' is not allowed")
+
+    # ------------------------------------------------------------------
+    # High-level resource helpers (used by workflows/executor)
+    # ------------------------------------------------------------------
+
+    def create_resource(self, resource: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.post(f"/{resource}", payload)
+
+    def update_resource(self, resource: str, resource_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.put(f"/{resource}/{resource_id}", payload)
+
+    def delete_resource(self, resource: str, resource_id: int) -> Dict[str, Any]:
+        return self.delete(f"/{resource}/{resource_id}")
+
+    def list_resource(self, resource: str, fields: str = "id,*", count: int = 100, **extra_params: Any) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"fields": fields, "count": count}
+        params.update(extra_params)
+        return self.get(f"/{resource}", params=params)
+
+    def find_by_id(self, resource: str, resource_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            response = self.get(f"/{resource}/{resource_id}")
+        except TripletexClientError:
+            return None
+        if "value" in response and isinstance(response["value"], dict):
+            return response["value"]
+        if response.get("id"):
+            return response
+        return response if response else None
+
+    def find_single(
+        self,
+        resource: str,
+        match_fields: Dict[str, Any],
+        fields: str = "id,*",
+    ) -> Optional[Dict[str, Any]]:
+        if not match_fields:
+            return None
+
+        # Build query params from match fields
+        query_params: Dict[str, Any] = {"fields": fields, "count": 200}
+        field_map = {
+            "first_name": "firstName",
+            "last_name": "lastName",
+        }
+        for key, value in match_fields.items():
+            api_key = field_map.get(key, key)
+            query_params[api_key] = value
+
+        try:
+            response = self.get(f"/{resource}", params=query_params)
+        except TripletexClientError:
+            return None
+        candidates = response.get("values", [])
+        if not candidates:
+            return None
+
+        # Score candidates against match fields
+        scored: List[tuple] = []
+        for candidate in candidates:
+            score = self._score_candidate(candidate, match_fields)
+            if score > 0:
+                scored.append((score, candidate))
+
+        if not scored:
+            # Fallback: if exactly one result and a strong identifier was used, return it
+            strong_identifiers = {"organizationNumber", "email", "first_name", "last_name"}
+            has_strong = any(k in strong_identifiers for k in match_fields)
+            if len(candidates) == 1 and has_strong:
+                # Don't fallback for name-only queries
+                if set(match_fields.keys()) <= {"name"}:
+                    return None
+                return candidates[0]
+            return None
+
+        # Find unique best
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if len(scored) >= 2 and scored[0][0] == scored[1][0]:
+            return None  # Tie — ambiguous
+        return scored[0][1]
+
+    def _score_candidate(self, candidate: Dict[str, Any], match_fields: Dict[str, Any]) -> int:
+        score = 0
+        for key, expected in match_fields.items():
+            actual = self._get_candidate_value(candidate, key)
+            if actual is None or expected is None:
+                continue
+            if self._values_match(key, str(actual), str(expected)):
+                score += 1
+        return score
+
+    def _get_candidate_value(self, candidate: Dict[str, Any], key: str) -> Optional[Any]:
+        field_map = {
+            "first_name": "firstName",
+            "last_name": "lastName",
+        }
+        api_key = field_map.get(key, key)
+        return candidate.get(api_key)
+
+    def _values_match(self, key: str, actual: str, expected: str) -> bool:
+        if key in ("organizationNumber", "phoneNumber", "phoneNumberMobile"):
+            actual_digits = re.sub(r"[^\d+]", "", actual)
+            expected_digits = re.sub(r"[^\d+]", "", expected)
+            return actual_digits == expected_digits
+        return self._normalize_string(actual) == self._normalize_string(expected)
+
+    def _candidate_matches(self, candidate: Dict[str, Any], match_fields: Dict[str, Any]) -> bool:
+        for key, expected in match_fields.items():
+            actual = self._get_candidate_value(candidate, key)
+            if actual is None:
+                return False
+            if not self._values_match(key, str(actual), str(expected)):
+                return False
+        return True
+
+    def _normalize_string(self, value: str) -> str:
+        # Remove diacritics, lowercase, strip punctuation
+        nfkd = unicodedata.normalize("NFKD", value)
+        stripped = "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+        result = re.sub(r"[(){}[\]]", " ", stripped.lower())
+        result = re.sub(r"\s+", " ", result).strip()
+        return result
 
     def _normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if "values" in data:

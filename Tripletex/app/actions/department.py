@@ -21,10 +21,6 @@ def handle(client: TripletexClient, plan: Plan) -> Dict[str, Any]:
     details = plan.steps[0].details.get("prompt", "") if plan.steps else ""
     department_names = _extract_department_names(details)
 
-    print("DEPARTMENT HANDLER CALLED")
-    print("DEPARTMENT DETAILS:", details)
-    print("DEPARTMENT NAMES:", department_names)
-
     created = []
     for name in department_names:
         payload = {"name": name}

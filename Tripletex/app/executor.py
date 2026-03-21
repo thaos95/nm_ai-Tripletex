@@ -17,9 +17,6 @@ def execute_plan(client: TripletexClient, plan: Plan) -> Dict[str, Any]:
     if not handler:
         raise RuntimeError(f"No handler found for task_type={plan.task_type}")
 
-    print("EXECUTOR TASK TYPE:", plan.task_type)
-    print("EXECUTOR HANDLER:", handler.__module__, handler.__name__)
-
     LOGGER.info("Dispatching to handler=%s", handler.__name__)
     result = handler(client, plan)
     LOGGER.info("Handler result=%s", result)

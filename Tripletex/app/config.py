@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL")
+    # Replicate API (alternative to OpenAI)
+    replicate_api_token: Optional[str] = Field(default=None, alias="REPLICATE_API_TOKEN")
+    replicate_model: str = Field(default="meta/llama-4-scout-instruct", alias="REPLICATE_MODEL")
     enable_preflight: bool = Field(default=False, alias="TRIPLETEX_ENABLE_PREFLIGHT")
     enable_bank_account_creation: bool = Field(
         default=False, alias="TRIPLETEX_ENABLE_BANK_ACCOUNT_CREATION"
