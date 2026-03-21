@@ -806,13 +806,28 @@ def _resolve_invoice_for_payment_reversal(
     return int(invoice_id) if invoice_id is not None else None
 
 
+def _build_reverse_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
+    payload = _build_invoice_payment_payload(fields)
+    if "paymentDate" not in payload:
+        payload["paymentDate"] = fields.get("paymentDate") or fields.get("invoiceDate") or _today_iso()
+    if "paidAmount" not in payload and fields.get("amount") is not None:
+        payload["paidAmount"] = fields.get("amount")
+    if payload.get("paidAmount") is None:
+        raise MissingPrerequisiteError(
+            stage="payment_reversal",
+            task_type=TaskType.REVERSE_PAYMENT,
+            issue="payment_amount_missing",
+            payload=fields,
+            request_id=None,
+            validation_messages=["Payment amount is required for reversal."],
+        )
+    payload.setdefault("amountPaidCurrency", payload["paidAmount"])
+    payload["reverse"] = "true"
+    return payload
+
+
 def _reverse_invoice_payment(client: TripletexClient, invoice_id: int, fields: Dict[str, Any], operations: list) -> None:
-    params = {"reverse": "true"}
-    payment_date = fields.get("paymentDate")
-    if payment_date:
-        params["paymentDate"] = payment_date
-    if fields.get("amount"):
-        params["amountPaidCurrency"] = fields.get("amount")
+    params = _build_reverse_payment_payload(fields)
     try:
         response = client._request("PUT", "/invoice/{0}/:payment".format(int(invoice_id)), params=params)
     except TripletexClientError as exc:
@@ -829,6 +844,23 @@ def _reverse_invoice_payment(client: TripletexClient, invoice_id: int, fields: D
                 )
             )
             return
+        if is_company_bank_account_missing(exc):
+            request_id = extract_tripletex_request_id(exc)
+            validation_messages = extract_validation_messages(exc)
+            logger.warning(
+                "reverse_payment_missing_bank_account payload=%s requestId=%s validationMessages=%s",
+                json.dumps(params, ensure_ascii=False, default=str),
+                request_id,
+                validation_messages,
+            )
+            raise MissingPrerequisiteError(
+                stage="payment_reversal",
+                task_type=TaskType.REVERSE_PAYMENT,
+                issue="company_bank_account_required",
+                payload=params,
+                request_id=request_id,
+                validation_messages=validation_messages,
+            )
         raise
     operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
 
