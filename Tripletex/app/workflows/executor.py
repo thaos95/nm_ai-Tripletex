@@ -1,9 +1,13 @@
 from datetime import date, datetime, timedelta
+import json
 from typing import Any, Dict, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.error_handling import TripletexErrorCategory, classify_tripletex_error
+from app.logging_utils import get_logger
 from app.schemas import ExecutionPlan, ExecutionResult, OperationResult, TaskType
+
+logger = get_logger()
 
 
 def _extract_id(response: Dict[str, Any]) -> Optional[int]:
@@ -129,8 +133,33 @@ def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) ->
         "invoiceNumber": fields.get("invoiceNumber"),
         "supplier": {"id": supplier_id},
         "amount": fields.get("amount"),
+        "invoiceLines": _build_supplier_invoice_lines(fields),
     }
     return _compact_payload(payload)
+
+
+def _build_supplier_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
+    amount = fields.get("amount")
+    account_number = fields.get("accountNumber")
+    vat_percentage = fields.get("vatPercentage")
+    if amount is None or account_number is None:
+        return None
+    line = {
+        "amount": amount,
+        "account": {"number": str(account_number)},
+    }
+    if vat_percentage is not None:
+        line["vatPercentage"] = vat_percentage
+    return [_compact_payload(line)]
+
+
+def _validate_supplier_invoice_fields(fields: Dict[str, Any]) -> None:
+    required = ["invoiceNumber", "invoiceDate", "amount", "accountNumber"]
+    missing = [name for name in required if not fields.get(name)]
+    if missing:
+        raise ValueError(
+            "Supplier invoice missing required fields: {0}".format(", ".join(missing))
+        )
 
 
 def _build_minimal_invoice_payload(
@@ -993,7 +1022,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if supplier_id is None:
             raise TripletexClientError(message="Supplier invoice requires resolvable supplier")
-        response = client.create_resource("supplierInvoice", _build_supplier_invoice_payload(fields, supplier_id))
+        _validate_supplier_invoice_fields(fields)
+        payload = _build_supplier_invoice_payload(fields, supplier_id)
+        logger.info("supplier_invoice_payload=%s", json.dumps(payload, ensure_ascii=False, default=str))
+        response = client.create_resource("supplierInvoice", payload)
         operations.append(
             OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
         )
