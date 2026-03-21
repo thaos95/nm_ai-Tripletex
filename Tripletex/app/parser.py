@@ -1769,87 +1769,37 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
     )
 
 
+def _merge_rule_fields(llm_result: ParsedTask, rule_result: ParsedTask) -> ParsedTask:
+    """Enrich LLM result with any extra fields the rule-based parser found."""
+    for key, value in rule_result.fields.items():
+        if key not in llm_result.fields:
+            llm_result.fields[key] = value
+    for key, value in rule_result.match_fields.items():
+        if key not in llm_result.match_fields:
+            llm_result.match_fields[key] = value
+    for key, value in rule_result.related_entities.items():
+        if key not in llm_result.related_entities:
+            llm_result.related_entities[key] = value
+        else:
+            for nested_key, nested_value in value.items():
+                if nested_key not in llm_result.related_entities[key]:
+                    llm_result.related_entities[key][nested_key] = nested_value
+    return llm_result
+
+
 def parse_prompt(prompt: str) -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
+
+    # Fast exit for clearly unsupported prompts (bank reconciliation, etc.)
     if rule_based.task_type == TaskType.UNSUPPORTED and rule_based.confidence >= 0.9:
         return rule_based
-    if rule_based.task_type == TaskType.CREATE_SUPPLIER_INVOICE and rule_based.confidence >= 0.9 and rule_based.related_entities.get("supplier"):
-        return rule_based
-    if rule_based.task_type in {
-        TaskType.CREATE_EMPLOYEE,
-        TaskType.UPDATE_EMPLOYEE,
-        TaskType.LIST_EMPLOYEES,
-        TaskType.CREATE_CUSTOMER,
-        TaskType.UPDATE_CUSTOMER,
-        TaskType.SEARCH_CUSTOMERS,
-        TaskType.CREATE_PRODUCT,
-        TaskType.CREATE_DEPARTMENT,
-        TaskType.DELETE_TRAVEL_EXPENSE,
-        TaskType.UPDATE_TRAVEL_EXPENSE,
-        TaskType.LIST_LEDGER_ACCOUNTS,
-        TaskType.LIST_LEDGER_POSTINGS,
-    } and rule_based.confidence >= 0.84:
-        return rule_based
-    if rule_based.task_type == TaskType.CREATE_DEPARTMENT and (
-        rule_based.fields.get("departmentNames") or rule_based.fields.get("name")
-    ):
-        return rule_based
-    if rule_based.task_type == TaskType.CREATE_INVOICE and (
-        rule_based.fields.get("markAsPaid") or any(key.startswith("order_line_") for key in rule_based.related_entities)
-    ):
-        return rule_based
-    if rule_based.task_type == TaskType.CREATE_PROJECT_BILLING and rule_based.confidence >= 0.78:
-        return rule_based
-    if rule_based.task_type == TaskType.CREATE_PAYROLL_VOUCHER and rule_based.confidence >= 0.7:
-        return rule_based
-    if rule_based.task_type == TaskType.REVERSE_PAYMENT and rule_based.confidence >= 0.75:
-        return rule_based
 
+    # LLM is primary — try it first
     llm_parsed = parse_prompt_with_llm(prompt)
-    specialized_rule_tasks = {
-        TaskType.CREATE_TRAVEL_EXPENSE,
-        TaskType.CREATE_CREDIT_NOTE,
-        TaskType.CREATE_PROJECT_BILLING,
-        TaskType.CREATE_DIMENSION_VOUCHER,
-        TaskType.CREATE_PAYROLL_VOUCHER,
-    }
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
-        if rule_based.task_type != TaskType.UNSUPPORTED and rule_based.confidence >= 0.78 and llm_parsed.task_type != rule_based.task_type:
-            return rule_based
-        if (
-            rule_based.task_type in specialized_rule_tasks
-            and llm_parsed.task_type != rule_based.task_type
-            and rule_based.confidence >= 0.7
-        ):
-            return rule_based
-        if llm_parsed.task_type == rule_based.task_type:
-            for key, value in rule_based.fields.items():
-                if key not in llm_parsed.fields:
-                    llm_parsed.fields[key] = value
-            for key, value in rule_based.match_fields.items():
-                if key not in llm_parsed.match_fields:
-                    llm_parsed.match_fields[key] = value
-            for key, value in rule_based.related_entities.items():
-                if key not in llm_parsed.related_entities:
-                    llm_parsed.related_entities[key] = value
-                else:
-                    for nested_key, nested_value in value.items():
-                        if nested_key not in llm_parsed.related_entities[key]:
-                            llm_parsed.related_entities[key][nested_key] = nested_value
-            return llm_parsed
+        # Merge any extra fields from rule-based parser
+        return _merge_rule_fields(llm_parsed, rule_based)
 
-        llm_detail_score = len(llm_parsed.fields) + len(llm_parsed.match_fields) + sum(
-            len(value) for value in llm_parsed.related_entities.values()
-        )
-        rule_detail_score = len(rule_based.fields) + len(rule_based.match_fields) + sum(
-            len(value) for value in rule_based.related_entities.values()
-        )
-        if (
-            rule_based.task_type != TaskType.UNSUPPORTED
-            and rule_detail_score > llm_detail_score
-            and rule_based.confidence >= llm_parsed.confidence - 0.1
-        ):
-            return rule_based
-        return llm_parsed
+    # LLM failed or returned unsupported — fall back to rule-based
     return rule_based
