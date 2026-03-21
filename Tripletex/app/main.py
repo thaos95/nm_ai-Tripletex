@@ -77,6 +77,7 @@ async def solve(
         client = TripletexClient(
             base_url=str(request.tripletex_credentials.base_url),
             session_token=request.tripletex_credentials.session_token,
+            verify_tls=settings.verify_tls,
             transport=transport,
         )
         try:
