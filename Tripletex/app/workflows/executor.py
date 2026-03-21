@@ -1355,10 +1355,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         operations.append(OperationResult(name="list-ledger-accounts", payload=response))
 
     elif task_type == TaskType.LIST_LEDGER_POSTINGS:
+        today = date.today()
+        date_from = fields.get("dateFrom") or (today.replace(day=1)).isoformat()
+        date_to = fields.get("dateTo") or today.isoformat()
         response = client.list_resource(
             "ledger/posting",
             fields=fields.get("fields", "id,date,amount,description"),
             count=fields.get("count", 100),
+            dateFrom=date_from,
+            dateTo=date_to,
         )
         operations.append(OperationResult(name="list-ledger-postings", payload=response))
 

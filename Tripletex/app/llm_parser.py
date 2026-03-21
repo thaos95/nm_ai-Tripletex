@@ -68,7 +68,7 @@ Task types and what maps to them:
 - register_payment: record payment received on invoice, mark invoice as paid, registrer betaling
 - reverse_payment: undo/reverse a payment, tilbakefør betaling
 - list_ledger_accounts: show chart of accounts, list accounts, kontoplan
-- list_ledger_postings: show ledger entries, list postings, hovedbok
+- list_ledger_postings: show ledger entries, list postings, hovedbok, analyze costs/revenue over period. Use fields dateFrom/dateTo for date ranges.
 - unsupported: ONLY for tasks that truly cannot map to any type above (e.g. bank reconciliation, tax filing, Altinn reporting)
 
 Map natural language from Norwegian, English, Spanish, Portuguese, Nynorsk, German, or French.
