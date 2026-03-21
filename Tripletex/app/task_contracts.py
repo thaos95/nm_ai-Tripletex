@@ -52,6 +52,7 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
             TripletexErrorCategory.UNAUTHORIZED,
             TripletexErrorCategory.WRONG_ENDPOINT,
             TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+            TripletexErrorCategory.VALIDATION_PREREQUISITE,
         ],
     ),
     TaskType.CREATE_SUPPLIER_INVOICE: TaskContract(
@@ -63,6 +64,7 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
             TripletexErrorCategory.UNAUTHORIZED,
             TripletexErrorCategory.WRONG_ENDPOINT,
             TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+            TripletexErrorCategory.VALIDATION_PREREQUISITE,
         ],
     ),
     TaskType.CREATE_CREDIT_NOTE: TaskContract(
@@ -81,6 +83,7 @@ TASK_CONTRACTS: Dict[TaskType, TaskContract] = {
             TripletexErrorCategory.UNAUTHORIZED,
             TripletexErrorCategory.WRONG_ENDPOINT,
             TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+            TripletexErrorCategory.VALIDATION_PREREQUISITE,
         ],
     ),
     TaskType.CREATE_DIMENSION_VOUCHER: TaskContract(

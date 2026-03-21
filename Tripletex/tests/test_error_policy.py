@@ -26,7 +26,7 @@ def test_classify_tripletex_environment_validation_error() -> None:
         'Tripletex API error 422 on POST /invoice: {"validationMessages":[{"message":"Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer."}]}'
     )
 
-    assert classified.category == TripletexErrorCategory.VALIDATION_ENVIRONMENT
+    assert classified.category == TripletexErrorCategory.VALIDATION_PREREQUISITE
     assert classified.recoverable is False
 
 
@@ -55,4 +55,5 @@ def test_invoice_task_contract_declares_prerequisites_and_terminal_errors() -> N
     assert "/order" in contract.allowed_endpoints
     assert "customer" in contract.prerequisites
     assert TripletexErrorCategory.VALIDATION_ENVIRONMENT in contract.terminal_errors
+    assert TripletexErrorCategory.VALIDATION_PREREQUISITE in contract.terminal_errors
     assert TripletexErrorCategory.VALIDATION_GENERIC in contract.recoverable_errors
