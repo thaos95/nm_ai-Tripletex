@@ -2,7 +2,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
-from app.config import settings
 from app.error_handling import TripletexErrorCategory, classify_tripletex_error
 from app.schemas import ExecutionPlan, ExecutionResult, OperationResult, TaskType
 
@@ -166,30 +165,6 @@ def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: Trip
         return False
     classified = classify_tripletex_error(exc)
     return classified.category == TripletexErrorCategory.VALIDATION_GENERIC
-
-
-def _should_attempt_auto_bank_account_creation(exc: TripletexClientError) -> bool:
-    classified = classify_tripletex_error(exc)
-    return (
-        classified.category == TripletexErrorCategory.VALIDATION_PREREQUISITE
-        and "bankkonto" in (classified.summary or "").lower()
-        and settings.default_bank_account_number
-    )
-
-
-def _create_company_bank_account(client: TripletexClient, operations: list) -> bool:
-    if not settings.default_bank_account_number:
-        return False
-    payload = {
-        "bankAccountNumber": settings.default_bank_account_number,
-        "bankName": settings.default_bank_account_name,
-    }
-    try:
-        response = client.create_resource("company/bankAccount", payload)
-    except TripletexClientError:
-        return False
-    operations.append(OperationResult(name="create-company-bank-account", payload=response))
-    return True
 
 
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -534,19 +509,16 @@ def _create_invoice_with_fallback(
     try:
         response = client.create_resource("invoice", payload)
     except TripletexClientError as exc:
-        if _should_attempt_auto_bank_account_creation(exc) and _create_company_bank_account(client, operations):
-            response = client.create_resource("invoice", payload)
-        elif minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
+        if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
             raise
-        else:
-            fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
-            response = client.create_resource("invoice", fallback_payload)
-            operations.append(
-                OperationResult(
-                    name="{0}-retry-minimal".format(operation_name),
-                    payload={"invoice": response, "retry": "minimal-payload"},
-                )
+        fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
+        response = client.create_resource("invoice", fallback_payload)
+        operations.append(
+            OperationResult(
+                name="{0}-retry-minimal".format(operation_name),
+                payload={"invoice": response, "retry": "minimal-payload"},
             )
+        )
     operations.append(OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response))
     return response
 
