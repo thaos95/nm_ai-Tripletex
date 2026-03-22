@@ -263,26 +263,36 @@ def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: Trip
 
 def _build_travel_expense_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
-    travel_date = fields.get("expenseDate") or fields.get("date") or _today_iso()
-    payload["date"] = travel_date
     title = fields.get("title") or fields.get("description") or fields.get("name")
     if title:
         payload["title"] = title
-    amount = fields.get("amount")
-    if amount is not None:
-        cost_entry: Dict[str, Any] = {"amount": float(amount), "date": travel_date}
-        cost_description = fields.get("costDescription") or fields.get("description") or title
-        if cost_description:
-            cost_entry["description"] = cost_description
-        vat_type = fields.get("vatType") or fields.get("vatTypeId")
-        if vat_type:
-            cost_entry["vatType"] = {"id": int(vat_type)} if isinstance(vat_type, (int, str)) and str(vat_type).isdigit() else vat_type
-        payload["costs"] = [cost_entry]
     if fields.get("project"):
         payload["project"] = fields["project"]
     if fields.get("department"):
         payload["department"] = fields["department"]
     return _compact_payload(payload)
+
+
+def _build_travel_cost_payload(expense_id: int, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    amount = fields.get("amount")
+    if amount is None:
+        return None
+    travel_date = fields.get("expenseDate") or fields.get("date") or _today_iso()
+    cost: Dict[str, Any] = {
+        "travelExpense": {"id": expense_id},
+        "date": travel_date,
+        "amountCurrencyIncVat": float(amount),
+    }
+    description = fields.get("costDescription") or fields.get("description") or fields.get("title")
+    if description:
+        cost["comments"] = description
+    vat_type = fields.get("vatType") or fields.get("vatTypeId")
+    if vat_type and str(vat_type).isdigit():
+        cost["vatType"] = {"id": int(vat_type)}
+    payment_type = fields.get("paymentType") or fields.get("paymentTypeId")
+    if payment_type and str(payment_type).isdigit():
+        cost["paymentType"] = {"id": int(payment_type)}
+    return _compact_payload(cost)
 
 
 def _build_dimension_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -1394,6 +1404,16 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             if fallback_employee_id is not None:
                 payload["employee"] = {"id": fallback_employee_id}
         response = client.create_resource("travelExpense", _compact_payload(payload))
+        expense_id = _extract_id(response)
+        # Add cost as separate request
+        if expense_id:
+            cost_payload = _build_travel_cost_payload(expense_id, fields)
+            if cost_payload:
+                try:
+                    cost_response = client.create_resource("travelExpense/cost", cost_payload)
+                    operations.append(OperationResult(name="create-travel-cost", resource_id=_extract_id(cost_response), payload=cost_response))
+                except Exception as exc:
+                    logger.warning("Failed to create travel cost: %s", exc)
         operations.append(
             OperationResult(name="create-travel-expense", resource_id=_extract_id(response), payload=response)
         )
