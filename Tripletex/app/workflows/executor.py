@@ -1727,9 +1727,12 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         original_amount = fields.get("amount")
         if invoice_amount is not None:
             fields = dict(fields)  # copy to avoid mutating original
-            fields["amount"] = float(invoice_amount)
+            incl_vat = float(invoice_amount)
+            fields["amount"] = incl_vat
+            fields["paidAmountCurrency"] = incl_vat
+            fields["amountPaidCurrency"] = incl_vat
             logger.info("reverse_payment using invoice amount_incl_vat=%s instead of parsed=%s",
-                        invoice_amount, original_amount)
+                        incl_vat, original_amount)
         _reverse_invoice_payment(client, invoice_id, fields, operations, invoice_data=invoice_data)
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
@@ -2115,10 +2118,16 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             raise TripletexClientError(message="Register payment requires resolvable invoice")
         invoice_id = int(invoice_data.get("id"))
         # Use the actual invoice amount (incl. VAT) for the payment
+        # The Tripletex "amount" field on invoices is the total INCLUDING VAT
         invoice_amount = invoice_data.get("amount") or invoice_data.get("amountOutstanding")
         if invoice_amount is not None:
             fields = dict(fields)
-            fields["amount"] = float(invoice_amount)
+            incl_vat = float(invoice_amount)
+            logger.info("register_payment using invoice_amount_incl_vat=%s instead of parsed=%s", incl_vat, fields.get("amount"))
+            fields["amount"] = incl_vat
+            # Must also override paidAmountCurrency — otherwise _build_invoice_payment_payload uses the old value
+            fields["paidAmountCurrency"] = incl_vat
+            fields["amountPaidCurrency"] = incl_vat
         fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
         payment_params = _build_invoice_payment_payload(fields)
         logger.info("register_payment invoice_id=%s params=%s", invoice_id, payment_params)

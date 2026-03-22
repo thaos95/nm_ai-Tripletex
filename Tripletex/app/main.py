@@ -59,6 +59,8 @@ def _get_rag_context(query_text: str) -> str:
         from app.kb.rag import query as rag_query
         results = rag_query(query_text, top_k=3)
         if results:
+            for r in results:
+                LOGGER.info("RAG_HIT score=%.3f title=%s", r["score"], r["title"][:80])
             ctx = "\n".join(r["content"] for r in results)
             LOGGER.info("RAG_CONTEXT query=%s results=%d chars=%d", query_text[:60], len(results), len(ctx))
             return ctx
@@ -71,11 +73,15 @@ def _get_kb_gotchas_for_prompt(prompt: str) -> str:
     """Use keyword detection to find likely task type, then return KB gotchas."""
     try:
         from app.planner import _detect_task_type
-        from app.kb import get_gotchas
+        from app.kb import get_gotchas, get_forbidden_fields
         task_type = _detect_task_type(prompt)
         if task_type and task_type != "unsupported":
             gotchas = get_gotchas(task_type)
+            forbidden = get_forbidden_fields(task_type)
+            LOGGER.info("KB_LOOKUP task=%s gotchas=%d forbidden=%s", task_type, len(gotchas), list(forbidden) if forbidden else "[]")
             if gotchas:
+                for g in gotchas:
+                    LOGGER.info("KB_GOTCHA task=%s: %s", task_type, g[:100])
                 return "\n".join(f"- {g}" for g in gotchas)
     except Exception:
         pass

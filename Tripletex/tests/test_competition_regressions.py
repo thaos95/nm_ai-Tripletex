@@ -335,6 +335,24 @@ def test_create_supplier_invoice_es_with_vat():
 
 
 # ---------------------------------------------------------------------------
+# REGISTER_PAYMENT — nb, amount excl. VAT (competition: 404 on payment)
+# ---------------------------------------------------------------------------
+def test_register_payment_nb_excl_vat():
+    """Register payment for invoice with amount excl. VAT.
+    The payment endpoint needs the amount INCLUDING VAT, not the parsed excl. VAT."""
+    prompt = (
+        'Kunden Fjordkraft AS (org.nr 891380690) har en utestående faktura på '
+        '10100 kr eksklusiv MVA for "Konsulenttimer". Registrer full betaling '
+        'på denne fakturaen.'
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.REGISTER_PAYMENT
+    assert task.fields.get("amount") is not None
+    assert "customer" in task.related_entities
+    assert task.related_entities["customer"].get("organizationNumber") == "891380690"
+
+
+# ---------------------------------------------------------------------------
 # Validator whitelist: ensure no critical fields are silently dropped
 # ---------------------------------------------------------------------------
 class TestValidatorPreservesFields:
