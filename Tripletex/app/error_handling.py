@@ -93,7 +93,7 @@ def classify_tripletex_error(exc: Union["TripletexClientError", str]) -> Classif
     if status_code and 500 <= status_code < 600:
         return ClassifiedTripletexError(
             category=TripletexErrorCategory.SERVER_ERROR,
-            recoverable=True,
+            recoverable=False,
             summary=server_summary(),
             raw_message=raw_message,
         )

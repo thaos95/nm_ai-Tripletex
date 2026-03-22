@@ -387,19 +387,28 @@ def parse_prompt_with_llm(prompt: str, thinking_level: str = "medium") -> Option
 
 
 def _serialize_parsed_task(task: ParsedTask) -> str:
-    """Serialize a ParsedTask back to JSON for feeding into refinement."""
+    """Serialize a ParsedTask to readable JSON for feeding into refinement.
+
+    Uses nested objects (not double-encoded JSON strings) so the LLM
+    sees clean structure instead of escaped strings.
+    """
+    def _safe_dict(v):
+        """Convert mapping-like value to plain dict, pass through others."""
+        if isinstance(v, dict):
+            return dict(v)
+        if hasattr(v, "items"):
+            return dict(v)
+        return v
+
     return json.dumps({
         "task_type": task.task_type.value if isinstance(task.task_type, TaskType) else str(task.task_type),
         "confidence": task.confidence,
         "language_hint": task.language_hint,
-        "fields_json": json.dumps(task.fields, default=str, ensure_ascii=False),
-        "match_fields_json": json.dumps(task.match_fields, default=str, ensure_ascii=False),
-        "related_entities_json": json.dumps(
-            {k: dict(v) for k, v in task.related_entities.items()},
-            default=str, ensure_ascii=False,
-        ),
+        "fields": task.fields,
+        "match_fields": task.match_fields,
+        "related_entities": {k: _safe_dict(v) for k, v in task.related_entities.items()},
         "notes": task.notes,
-    }, indent=2, ensure_ascii=False)
+    }, indent=2, default=str, ensure_ascii=False)
 
 
 def refine_parse_with_llm(
