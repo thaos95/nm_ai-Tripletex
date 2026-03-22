@@ -908,3 +908,72 @@ class TestSupplierInvoiceFallbackPayload:
         assert "dueDate" not in payload, f"dueDate should not be in fallback payload: {payload}"
         assert payload.get("invoiceNumber") == "INV-123"
         assert payload.get("supplier") == {"id": 999}
+
+
+# ---------------------------------------------------------------------------
+# REGISTER_PAYMENT — German (competition: 401 swallowed → unknown category)
+# ---------------------------------------------------------------------------
+def test_register_payment_de_customer_org_number():
+    prompt = (
+        'Der Kunde Sonnental GmbH (Org.-Nr. 958906471) hat eine offene Rechnung '
+        'über 21750 NOK ohne MwSt. für "Webdesign". Registrieren Sie die '
+        'vollständige Zahlung dieser Rechnung.'
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.REGISTER_PAYMENT
+
+    # Must resolve customer by org number
+    customer = task.related_entities.get("customer", {})
+    assert customer.get("organizationNumber") == "958906471" or customer.get("name")
+
+    # Invoice description and amount
+    invoice = task.related_entities.get("invoice", {})
+    assert invoice or task.fields.get("amount")
+
+
+class TestFindSingleReRaisesAuthErrors:
+    """Verify find_single re-raises 401/403 instead of returning None."""
+
+    def test_401_propagates(self):
+        import pytest
+        from app.clients.tripletex import TripletexClient, TripletexClientError
+
+        client = TripletexClient(
+            base_url="https://example.com/v2",
+            session_token="bad-token",
+        )
+
+        # Mock the get method to raise 401
+        def mock_get(path, params=None, **kwargs):
+            raise TripletexClientError(
+                message="Unauthorized",
+                status_code=401,
+                path="/customer",
+                response_text='{"status":401}',
+            )
+
+        client.get = mock_get
+
+        with pytest.raises(TripletexClientError) as exc_info:
+            client.find_single("customer", {"organizationNumber": "958906471"})
+        assert exc_info.value.status_code == 401
+
+    def test_404_returns_none(self):
+        from app.clients.tripletex import TripletexClient, TripletexClientError
+
+        client = TripletexClient(
+            base_url="https://example.com/v2",
+            session_token="test-token",
+        )
+
+        def mock_get(path, params=None, **kwargs):
+            raise TripletexClientError(
+                message="Not found",
+                status_code=404,
+                path="/customer",
+                response_text='{"status":404}',
+            )
+
+        client.get = mock_get
+        result = client.find_single("customer", {"organizationNumber": "123"})
+        assert result is None

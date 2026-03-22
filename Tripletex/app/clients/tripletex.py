@@ -165,7 +165,9 @@ class TripletexClient:
     def find_by_id(self, resource: str, resource_id: int) -> Optional[Dict[str, Any]]:
         try:
             response = self.get(f"/{resource}/{resource_id}")
-        except TripletexClientError:
+        except TripletexClientError as exc:
+            if exc.status_code in (401, 403):
+                raise
             return None
         if "value" in response and isinstance(response["value"], dict):
             return response["value"]
@@ -194,7 +196,10 @@ class TripletexClient:
 
         try:
             response = self.get(f"/{resource}", params=query_params)
-        except TripletexClientError:
+        except TripletexClientError as exc:
+            # Re-raise auth errors — they can't be recovered by returning None
+            if exc.status_code in (401, 403):
+                raise
             return None
         candidates = response.get("values", [])
         if not candidates:
