@@ -38,6 +38,49 @@ def _verify_api_key(authorization: Optional[str] = Header(default=None)) -> None
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 
+def _attempt_solve(
+    prompt: str,
+    request: SolveRequest,
+    transport: Optional[httpx.BaseTransport],
+    attempt: int = 1,
+    thinking_level: str = "medium",
+) -> Optional[str]:
+    """Single solve attempt. Returns None on success, or error description on failure."""
+    parsed_task = parse_prompt(prompt, thinking_level=thinking_level)
+    LOGGER.info("attempt=%d thinking=%s parsed task_type=%s confidence=%.2f", attempt, thinking_level, parsed_task.task_type, parsed_task.confidence)
+
+    if parsed_task.task_type == TaskType.UNSUPPORTED:
+        return "unsupported"
+
+    validation = validate_and_normalize_task(parsed_task)
+    if validation.blocking_error:
+        LOGGER.warning("attempt=%d validation blocked: %s", attempt, validation.blocking_error)
+        return "validation: {0}".format(validation.blocking_error)
+
+    parsed_task = validation.parsed_task
+    plan = build_plan(parsed_task)
+
+    client = TripletexClient(
+        base_url=str(request.tripletex_credentials.base_url),
+        session_token=request.tripletex_credentials.session_token,
+        verify_tls=settings.verify_tls,
+        transport=transport,
+    )
+    try:
+        result = execute_plan(client, plan)
+        LOGGER.info(
+            "attempt=%d execution completed task_type=%s operations=%d error=%s",
+            attempt, result.task_type, len(result.operations), result.error,
+        )
+        if result.error:
+            return "execution: {0}".format(result.error)
+        if len(result.operations) == 0:
+            return "execution: zero operations"
+        return None  # success
+    finally:
+        client.close()
+
+
 @app.post("/solve", response_model=SolveResponse)
 async def solve(
     request: SolveRequest,
@@ -55,36 +98,18 @@ async def solve(
         # 1. Parse attachments
         attachments = parse_attachments(request.files)
 
-        # 2. Parse prompt (rule-based + LLM fallback)
-        parsed_task = parse_prompt(request.prompt)
-        LOGGER.info("Parsed task_type=%s confidence=%.2f", parsed_task.task_type, parsed_task.confidence)
+        # 2. First attempt
+        error = _attempt_solve(request.prompt, request, transport, attempt=1)
 
-        if parsed_task.task_type == TaskType.UNSUPPORTED:
-            LOGGER.warning("Unsupported prompt, returning completed anyway: %s", request.prompt[:120])
-            return SolveResponse(status="completed")
-
-        # 3. Validate and normalize
-        validation = validate_and_normalize_task(parsed_task)
-        if validation.blocking_error:
-            LOGGER.warning("Validation blocked: %s", validation.blocking_error)
-
-        parsed_task = validation.parsed_task
-
-        # 4. Build execution plan
-        plan = build_plan(parsed_task)
-
-        # 5. Execute
-        client = TripletexClient(
-            base_url=str(request.tripletex_credentials.base_url),
-            session_token=request.tripletex_credentials.session_token,
-            verify_tls=settings.verify_tls,
-            transport=transport,
-        )
-        try:
-            result = execute_plan(client, plan)
-            LOGGER.info("Execution completed task_type=%s operations=%d", result.task_type, len(result.operations))
-        finally:
-            client.close()
+        # 3. Retry on failure (a 0-score failure is always worse than retrying)
+        if error and error != "unsupported":
+            LOGGER.info("First attempt failed (%s), retrying with high thinking", error)
+            error2 = _attempt_solve(
+                request.prompt, request, transport,
+                attempt=2, thinking_level="high",
+            )
+            if error2:
+                LOGGER.warning("Retry also failed: %s", error2)
 
     except Exception:
         LOGGER.exception("Error during /solve — returning completed anyway")

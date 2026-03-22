@@ -1783,7 +1783,7 @@ def _merge_rule_fields(llm_result: ParsedTask, rule_result: ParsedTask) -> Parse
     return llm_result
 
 
-def parse_prompt(prompt: str) -> ParsedTask:
+def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
 
@@ -1792,7 +1792,7 @@ def parse_prompt(prompt: str) -> ParsedTask:
         return rule_based
 
     # LLM is primary — try it first
-    llm_parsed = parse_prompt_with_llm(prompt)
+    llm_parsed = parse_prompt_with_llm(prompt, thinking_level=thinking_level)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
         # Post-LLM validation: catch known misclassifications
         llm_parsed = _validate_llm_result(prompt, llm_parsed)

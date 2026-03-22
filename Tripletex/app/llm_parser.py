@@ -180,7 +180,7 @@ def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
+def _parse_prompt_with_replicate(prompt: str, thinking_level: str = "medium") -> Optional[ParsedTask]:
     if not settings.replicate_api_token:
         return None
 
@@ -190,7 +190,7 @@ def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
             "prompt": prompt,
             "temperature": 0.1,
             "top_p": 0.95,
-            "thinking_level": "medium",
+            "thinking_level": thinking_level,
             "max_output_tokens": 4096,
         },
     }
@@ -249,7 +249,7 @@ def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
         return None
 
 
-def _parse_prompt_with_openai(prompt: str) -> Optional[ParsedTask]:
+def _parse_prompt_with_openai(prompt: str, thinking_level: str = "medium") -> Optional[ParsedTask]:
     if not settings.openai_api_key:
         return None
 
@@ -309,15 +309,15 @@ def _parse_prompt_with_openai(prompt: str) -> Optional[ParsedTask]:
         return None
 
 
-def parse_prompt_with_llm(prompt: str) -> Optional[ParsedTask]:
-    result = _parse_prompt_with_replicate(prompt)
+def parse_prompt_with_llm(prompt: str, thinking_level: str = "medium") -> Optional[ParsedTask]:
+    result = _parse_prompt_with_replicate(prompt, thinking_level=thinking_level)
     if result is not None:
-        logger.info("replicate_parse_success task_type=%s confidence=%.2f", result.task_type, result.confidence)
+        logger.info("replicate_parse_success task_type=%s confidence=%.2f thinking=%s", result.task_type, result.confidence, thinking_level)
         return result
 
-    result = _parse_prompt_with_openai(prompt)
+    result = _parse_prompt_with_openai(prompt, thinking_level=thinking_level)
     if result is not None:
-        logger.info("openai_parse_success task_type=%s confidence=%.2f", result.task_type, result.confidence)
+        logger.info("openai_parse_success task_type=%s confidence=%.2f thinking=%s", result.task_type, result.confidence, thinking_level)
         return result
 
     return None
