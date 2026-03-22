@@ -187,7 +187,7 @@ def _parse_prompt_with_replicate(prompt: str) -> Optional[ParsedTask]:
             "prompt": prompt,
             "temperature": 0.1,
             "top_p": 0.95,
-            "thinking_level": "low",
+            "thinking_level": "medium",
             "max_output_tokens": 4096,
         },
     }

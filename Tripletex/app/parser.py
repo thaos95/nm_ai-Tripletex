@@ -1794,8 +1794,29 @@ def parse_prompt(prompt: str) -> ParsedTask:
     # LLM is primary — try it first
     llm_parsed = parse_prompt_with_llm(prompt)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
+        # Post-LLM validation: catch known misclassifications
+        llm_parsed = _validate_llm_result(prompt, llm_parsed)
         # Merge any extra fields from rule-based parser
         return _merge_rule_fields(llm_parsed, rule_based)
 
     # LLM failed or returned unsupported — fall back to rule-based
     return rule_based
+
+
+def _validate_llm_result(prompt: str, result: ParsedTask) -> ParsedTask:
+    """Fix known LLM misclassifications based on prompt signals."""
+    lowered = _normalized_text(prompt)
+
+    # "send/sende/sendte faktura" = create_invoice, NOT register_payment
+    if result.task_type == TaskType.REGISTER_PAYMENT:
+        invoice_send_patterns = [
+            "sende ein faktura", "sende en faktura", "sendte en faktura",
+            "sendte ein faktura", "send an invoice", "send invoice",
+            "send a invoice", "enviar factura", "enviar una factura",
+            "envoyer une facture", "envie uma fatura",
+        ]
+        if any(p in lowered for p in invoice_send_patterns):
+            result.task_type = TaskType.CREATE_INVOICE
+            result.confidence = 0.95
+
+    return result
