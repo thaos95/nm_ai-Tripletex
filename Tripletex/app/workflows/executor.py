@@ -1242,36 +1242,70 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
 
     elif task_type == TaskType.CREATE_DIMENSION_VOUCHER:
-        selected_value_id = None
-        value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
-        selected_value_name = str(fields.get("selectedDimensionValue") or "")
-        dimension_response = client.create_resource("ledger/accountingDimensionName", _build_dimension_payload(fields))
-        dimension_id = _extract_id(dimension_response)
-        operations.append(
-            OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
-        )
-        for value_name in value_names:
-            value_response = client.create_resource(
-                "ledger/accountingDimensionValue",
-                _build_dimension_value_payload(int(dimension_id), value_name),
-            )
-            value_id = _extract_id(value_response)
+        debit_account = fields.get("debitAccountNumber") or fields.get("accountNumber")
+        credit_account = fields.get("creditAccountNumber")
+        amount = float(fields.get("amount", 0))
+        description = fields.get("description") or "Journal entry"
+        voucher_date = fields.get("date") or _today_iso()
+
+        if debit_account and credit_account and amount:
+            # Simple journal entry: debit one account, credit another
+            voucher_payload = _compact_payload({
+                "date": voucher_date,
+                "description": description,
+                "postings": [
+                    {
+                        "account": {"number": int(debit_account)},
+                        "amount": abs(amount),
+                        "description": description,
+                    },
+                    {
+                        "account": {"number": int(credit_account)},
+                        "amount": -abs(amount),
+                        "description": description,
+                    },
+                ],
+            })
+            voucher_response = client.create_resource("ledger/voucher", voucher_payload)
             operations.append(
-                OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
+                OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
             )
-            if value_name == selected_value_name:
-                selected_value_id = value_id
-        voucher_payload = _build_voucher_payload(
-            fields,
-            description="Dimension voucher {0}".format(fields.get("dimensionName")),
-            account_number=str(fields.get("accountNumber")),
-            amount=float(fields.get("amount", 0)),
-            dimension_value_id=selected_value_id,
-        )
-        voucher_response = client.create_resource("ledger/voucher", voucher_payload)
-        operations.append(
-            OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
-        )
+        else:
+            # Dimension-based voucher flow
+            selected_value_id = None
+            value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
+            selected_value_name = str(fields.get("selectedDimensionValue") or "")
+            dim_name = fields.get("dimensionName") or description
+            dimension_response = client.create_resource(
+                "ledger/accountingDimensionName",
+                _compact_payload({"dimensionName": dim_name}),
+            )
+            dimension_id = _extract_id(dimension_response)
+            operations.append(
+                OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
+            )
+            for value_name in value_names:
+                value_response = client.create_resource(
+                    "ledger/accountingDimensionValue",
+                    _build_dimension_value_payload(int(dimension_id), value_name),
+                )
+                value_id = _extract_id(value_response)
+                operations.append(
+                    OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
+                )
+                if value_name == selected_value_name:
+                    selected_value_id = value_id
+            voucher_payload = _build_voucher_payload(
+                fields,
+                description=description,
+                account_number=str(debit_account or "9999"),
+                amount=amount,
+                dimension_value_id=selected_value_id,
+            )
+            voucher_response = client.create_resource("ledger/voucher", voucher_payload)
+            operations.append(
+                OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+            )
 
     elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
         employee_spec = related.get("employee", {})
