@@ -135,6 +135,26 @@ def test_reverse_payment_nn():
 # ---------------------------------------------------------------------------
 # CREATE_PROJECT_BILLING — activity + time entries must be in related_entities
 # ---------------------------------------------------------------------------
+def test_project_billing_full_cycle_nn_not_blocked():
+    """Full project cycle: multiple employees, supplier cost, customer invoice.
+    Validator was blocking with 'requires billable amount' because budget != amount."""
+    prompt = (
+        "Gjennomfør heile prosjektsyklusen for 'Dataplattform Skogheim' (Skogheim AS, org.nr 841795067): "
+        "1) Prosjektet har budsjett 258650 kr. "
+        "2) Registrer timar: Torbjørn Brekke (prosjektleiar, torbjrn.brekke@example.org) 64 timar "
+        "og Arne Kvamme (konsulent, arne.kvamme@example.org) 87 timar. "
+        "3) Registrer leverandørkostnad 77950 kr frå Nordlys AS (org.nr 894689668). "
+        "4) Opprett kundefaktura for prosjektet."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_PROJECT_BILLING
+    assert task.fields.get("name") is not None
+    # Must not be blocked — budget/fixedPriceAmountCurrency should serve as amount fallback
+    assert task.fields.get("amount") is not None
+    assert "customer" in task.related_entities
+    assert task.related_entities["customer"].get("organizationNumber") == "841795067"
+
+
 def test_project_billing_nn_preserves_activity_and_hours():
     prompt = (
         'Registrer 28 timar for Bjørn Kvamme (bjrn.kvamme@example.org) på aktiviteten "Analyse" '

@@ -1378,30 +1378,81 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 except TripletexClientError as exc:
                     logger.warning("activity_creation_failed name=%s error=%s", activity_name, exc)
 
-        # --- Register timesheet entries ---
+        # --- Collect all employees with hours ---
+        ts_date = fields.get("startDate") or _today_iso()
+        hourly_rate = fields.get("hourlyRateCurrency")
+
+        # Build list of (employee_spec, hours) from related entities
+        time_entries_to_register: list = []
+        # Primary time_entry
         time_spec = related.get("time_entry") or related.get("time_entries") or {}
-        hours = time_spec.get("hours")
-        employee_id = manager_id  # The employee registering hours is typically the project manager
-        if hours and employee_id and project_id:
-            hourly_rate = time_spec.get("hourlyRate") or fields.get("hourlyRateCurrency")
-            ts_date = fields.get("startDate") or _today_iso()
-            ts_payload: Dict[str, Any] = {
-                "employee": {"id": employee_id},
-                "project": {"id": project_id},
-                "date": ts_date,
-                "hours": float(hours),
-            }
-            if activity_id:
-                ts_payload["activity"] = {"id": activity_id}
-            if hourly_rate:
-                ts_payload["hourlyRate"] = float(hourly_rate)
-            try:
-                ts_response = client.create_resource("timesheet/entry", ts_payload)
-                ts_id = _extract_id(ts_response)
-                operations.append(OperationResult(name="create-timesheet-entry", resource_id=ts_id, payload=ts_response))
-                logger.info("timesheet_entry_created id=%s hours=%s project=%s", ts_id, hours, project_id)
-            except TripletexClientError as exc:
-                logger.warning("timesheet_entry_failed payload=%s error=%s", ts_payload, exc)
+        if time_spec.get("hours"):
+            time_entries_to_register.append((manager_spec, float(time_spec["hours"]), time_spec.get("hourlyRate") or hourly_rate))
+
+        # Additional numbered employees (employee_1, employee_2, ...)
+        for key in sorted(related.keys()):
+            if key.startswith("employee_") and key[9:].isdigit():
+                emp_spec = related[key]
+                emp_hours = emp_spec.get("hours")
+                if not emp_hours:
+                    # Check for corresponding time_entry_N
+                    idx = key.split("_")[1]
+                    ts_key = "time_entry_{0}".format(idx)
+                    ts_spec = related.get(ts_key, {})
+                    emp_hours = ts_spec.get("hours")
+                if emp_hours:
+                    time_entries_to_register.append((emp_spec, float(emp_hours), emp_spec.get("hourlyRate") or hourly_rate))
+
+        # If no explicit time entries found but manager has hours in their spec
+        if not time_entries_to_register and manager_spec.get("hours"):
+            time_entries_to_register.append((manager_spec, float(manager_spec["hours"]), hourly_rate))
+
+        # Register all timesheet entries
+        for emp_spec, hours, rate in time_entries_to_register:
+            emp_id = _resolve_project_manager(client, emp_spec, operations) if emp_spec.get("email") or emp_spec.get("first_name") else manager_id
+            if emp_id and project_id:
+                ts_payload: Dict[str, Any] = {
+                    "employee": {"id": emp_id},
+                    "project": {"id": project_id},
+                    "date": ts_date,
+                    "hours": hours,
+                }
+                if activity_id:
+                    ts_payload["activity"] = {"id": activity_id}
+                if rate:
+                    ts_payload["hourlyRate"] = float(rate)
+                try:
+                    ts_response = client.create_resource("timesheet/entry", ts_payload)
+                    ts_id = _extract_id(ts_response)
+                    operations.append(OperationResult(name="create-timesheet-entry", resource_id=ts_id, payload=ts_response))
+                    logger.info("timesheet_entry_created id=%s hours=%s employee=%s project=%s", ts_id, hours, emp_id, project_id)
+                except TripletexClientError as exc:
+                    logger.warning("timesheet_entry_failed payload=%s error=%s", ts_payload, exc)
+
+        # --- Register supplier invoice if present ---
+        supplier_spec = related.get("supplier", {})
+        supplier_invoice_spec = related.get("supplier_invoice", {})
+        if supplier_spec and supplier_invoice_spec.get("amount"):
+            supplier_id = _resolve_customer(
+                client, {**supplier_spec, "isSupplier": True}, operations,
+                allow_create=bool(supplier_spec.get("name")),
+            )
+            if supplier_id:
+                si_amount = float(supplier_invoice_spec["amount"])
+                si_payload: Dict[str, Any] = {
+                    "invoiceDate": fields.get("invoiceDate") or _today_iso(),
+                    "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or _today_iso(),
+                    "supplier": {"id": supplier_id},
+                    "orderLines": [{"amountInclVat": si_amount, "externalId": "supplier-cost-1"}],
+                }
+                try:
+                    si_response = client.create_resource("incomingInvoice", si_payload)
+                    operations.append(OperationResult(
+                        name="create-supplier-invoice", resource_id=_extract_id(si_response), payload=si_response
+                    ))
+                    logger.info("supplier_invoice_created for project billing amount=%s supplier=%s", si_amount, supplier_id)
+                except TripletexClientError as exc:
+                    logger.warning("supplier_invoice_failed payload=%s error=%s", si_payload, exc)
 
         # --- Create order and invoice ---
         order_description = related.get("order", {}).get("description") or activity_name or "Project partial billing"
