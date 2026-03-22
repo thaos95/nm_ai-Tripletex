@@ -98,6 +98,9 @@ def _attempt_solve(
         if len(result.operations) == 0:
             return "execution: zero operations"
         return None  # success
+    except MissingPrerequisiteError as exc:
+        LOGGER.error("PREREQUISITE_ERROR attempt=%d %s", attempt, exc)
+        return "prerequisite: {0}".format(str(exc)[:200])
     except TripletexClientError as exc:
         LOGGER.error(
             "EXECUTION_ERROR attempt=%d status=%s path=%s response=%s",

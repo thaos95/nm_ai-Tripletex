@@ -291,6 +291,28 @@ def _ensure_company_bank_account(client: TripletexClient, spec: Dict[str, str], 
             json.dumps(payload, ensure_ascii=False, default=str),
             str(exc),
         )
+
+
+# Hardcoded Norwegian test bank account for sandbox environments
+_FALLBACK_BANK_ACCOUNT_NUMBER = "12345678903"
+
+
+def _force_create_company_bank_account(client: TripletexClient, operations: list) -> None:
+    """Create a company bank account unconditionally — used when invoice creation fails due to missing bank account."""
+    payload = {"bankAccountNumber": _FALLBACK_BANK_ACCOUNT_NUMBER}
+    try:
+        response = client.create_resource("company/bankAccount", payload)
+        operations.append(
+            OperationResult(
+                name="auto-create-company-bank-account",
+                payload={"bankAccount": response},
+            )
+        )
+        logger.info("auto_created_company_bank_account response=%s", response)
+    except TripletexClientError as exc:
+        logger.warning("auto_create_bank_account_failed error=%s", str(exc))
+
+
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
     if fields.get("creditNote"):
         return False
@@ -685,36 +707,22 @@ def _create_invoice_with_fallback(
         response = client.create_resource("invoice", payload)
     except TripletexClientError as exc:
         if is_company_bank_account_missing(exc):
-            request_id = extract_tripletex_request_id(exc)
-            validation_messages = extract_validation_messages(exc)
             logger.warning(
-                "company_bank_account_missing task_type=%s payload=%s requestId=%s validationMessages=%s",
+                "company_bank_account_missing task_type=%s — auto-creating bank account and retrying",
                 operation_name,
-                json.dumps(payload, ensure_ascii=False, default=str),
-                request_id,
-                validation_messages,
             )
-            resolved_task_type = task_type if isinstance(task_type, TaskType) else TaskType(task_type)
-            raise MissingPrerequisiteError(
-                stage="invoice_creation",
-                task_type=resolved_task_type,
-                issue="company_bank_account_required",
-                payload=payload,
-                request_id=request_id,
-                validation_messages=validation_messages,
-            )
-        if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
+            _force_create_company_bank_account(client, operations)
+            # Retry invoice creation after bank account is in place
+            response = client.create_resource("invoice", payload)
+        elif minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
             raise
-        if minimal_first or not _should_retry_invoice_with_minimal_payload(fields, exc):
-            raise
-        fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
-        response = client.create_resource("invoice", fallback_payload)
-        operations.append(
-            OperationResult(
-                name="{0}-retry-minimal".format(operation_name),
-                payload={"invoice": response, "retry": "minimal-payload"},
+        else:
+            fallback_payload = _build_minimal_invoice_payload(fields, customer_id, order_id)
+            response = client.create_resource("invoice", fallback_payload)
+            operations.append(
+                OperationResult(name="invoice-fallback-to-minimal", payload=fallback_payload)
             )
-        )
+        # If we reach here from the bank-account retry, fall through to normal return
     operations.append(OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response))
     return response
 
@@ -1289,7 +1297,53 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             project_response = client.create_resource("project", _compact_payload(payload))
         project_id = _extract_id(project_response)
         operations.append(OperationResult(name="create-billing-project", resource_id=project_id, payload=project_response))
-        order_description = related.get("order", {}).get("description") or "Project partial billing"
+
+        # --- Resolve or create activity ---
+        activity_id = None
+        activity_spec = related.get("activity", {})
+        activity_name = activity_spec.get("name") if activity_spec else None
+        if activity_name:
+            try:
+                existing = client.find_single("activity", {"name": activity_name})
+                if existing:
+                    activity_id = existing.get("id")
+            except TripletexClientError:
+                pass
+            if activity_id is None:
+                try:
+                    act_response = client.create_resource("activity", {"name": activity_name})
+                    activity_id = _extract_id(act_response)
+                    operations.append(OperationResult(name="create-activity", resource_id=activity_id, payload=act_response))
+                except TripletexClientError as exc:
+                    logger.warning("activity_creation_failed name=%s error=%s", activity_name, exc)
+
+        # --- Register timesheet entries ---
+        time_spec = related.get("time_entry") or related.get("time_entries") or {}
+        hours = time_spec.get("hours")
+        employee_id = manager_id  # The employee registering hours is typically the project manager
+        if hours and employee_id and project_id:
+            hourly_rate = time_spec.get("hourlyRate") or fields.get("hourlyRateCurrency")
+            ts_date = fields.get("startDate") or _today_iso()
+            ts_payload: Dict[str, Any] = {
+                "employee": {"id": employee_id},
+                "project": {"id": project_id},
+                "date": ts_date,
+                "hours": float(hours),
+            }
+            if activity_id:
+                ts_payload["activity"] = {"id": activity_id}
+            if hourly_rate:
+                ts_payload["hourlyRate"] = float(hourly_rate)
+            try:
+                ts_response = client.create_resource("timesheet/entry", ts_payload)
+                ts_id = _extract_id(ts_response)
+                operations.append(OperationResult(name="create-timesheet-entry", resource_id=ts_id, payload=ts_response))
+                logger.info("timesheet_entry_created id=%s hours=%s project=%s", ts_id, hours, project_id)
+            except TripletexClientError as exc:
+                logger.warning("timesheet_entry_failed payload=%s error=%s", ts_payload, exc)
+
+        # --- Create order and invoice ---
+        order_description = related.get("order", {}).get("description") or activity_name or "Project partial billing"
         order_id = _create_order(
             client,
             customer_id,
