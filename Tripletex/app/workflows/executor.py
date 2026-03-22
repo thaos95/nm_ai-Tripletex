@@ -139,9 +139,10 @@ def _build_project_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: Optional[int]) -> Dict[str, Any]:
+    today = _today_iso()
     payload = {
-        "invoiceDate": fields.get("invoiceDate"),
-        "invoiceDueDate": fields.get("invoiceDueDate"),
+        "invoiceDate": fields.get("invoiceDate") or today,
+        "invoiceDueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or today,
         "isCreditNote": fields.get("creditNote") or fields.get("isCreditNote"),
         "customer": {"id": customer_id},
         "orders": [{"id": order_id}] if order_id is not None else [],
@@ -150,12 +151,13 @@ def _build_invoice_payload(fields: Dict[str, Any], customer_id: int, order_id: O
 
 
 def _build_supplier_invoice_payload(fields: Dict[str, Any], supplier_id: int) -> Dict[str, Any]:
+    today = _today_iso()
     header = _compact_payload({
-        "invoiceDate": fields.get("invoiceDate"),
+        "invoiceDate": fields.get("invoiceDate") or today,
         "invoiceNumber": fields.get("invoiceNumber"),
         "vendorId": supplier_id,
         "invoiceAmount": fields.get("amount"),
-        "dueDate": fields.get("invoiceDueDate"),
+        "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or today,
         "description": fields.get("description"),
     })
     order_lines = _build_incoming_invoice_lines(fields)
