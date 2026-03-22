@@ -808,3 +808,103 @@ def test_create_invoice_with_payment_markAsPaid_gets_paymentDate():
     # After validator, it may be None (from missing invoiceDate), but executor fixes it.
     # This test verifies the parse+validate layer; the executor fix is tested at runtime.
     assert task.related_entities.get("customer", {}).get("organizationNumber") == "914083478"
+
+
+def test_create_department_nb_three_departments():
+    """Norwegian: create three departments Lager, Markedsføring, Kvalitetskontroll.
+
+    Regression: 7/7 (100%) — verifying this keeps working.
+    """
+    prompt = 'Opprett tre avdelinger i Tripletex: "Lager", "Markedsføring" og "Kvalitetskontroll".'
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DEPARTMENT, (
+        f"Expected CREATE_DEPARTMENT, got {task.task_type}"
+    )
+    names = task.fields.get("departmentNames", "")
+    assert "Lager" in names, f"Missing 'Lager' in departmentNames: {names}"
+    assert "Kvalitetskontroll" in names, f"Missing 'Kvalitetskontroll' in departmentNames: {names}"
+
+
+def test_supplier_invoice_nb_with_pdf():
+    """Norwegian supplier invoice from PDF.
+
+    Regression: /incomingInvoice returned 403, fallback /supplierInvoice rejected dueDate.
+    """
+    prompt = (
+        "Du har mottatt en leverandorfaktura (se vedlagt PDF). Registrer fakturaen i Tripletex. "
+        "Opprett leverandoren hvis den ikke finnes. Bruk riktig utgiftskonto og inngaende MVA.\n\n"
+        "--- Attachment: leverandorfaktura_nb_03.pdf ---\n"
+        "Leverandør: Nordhav AS\nOrg.nr: 888576495\n"
+        "Fakturanr: INV-2026-9869\nFakturadato: 2026-05-25\nForfallsdato: 2026-06-24\n"
+        "Beskrivelse: Kontorrekvisita\nBeløp eks. MVA: 10549.60\nMVA (25%): 2637.40\n"
+        "Totalbeløp: 13187.00\nKontonummer: 6500\nBankkontonummer: 32183864849"
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_SUPPLIER_INVOICE, (
+        f"Expected CREATE_SUPPLIER_INVOICE, got {task.task_type}"
+    )
+    assert task.fields.get("invoiceNumber"), "Missing invoiceNumber"
+    assert task.fields.get("amount") is not None, "Missing amount"
+    assert task.related_entities.get("supplier", {}).get("organizationNumber") == "888576495"
+
+
+def test_create_employee_nn_from_pdf_contract():
+    """Nynorsk employee creation from PDF contract.
+
+    Regression: employee payload included isActive in employments which Tripletex rejects.
+    """
+    prompt = (
+        "Du har motteke ein arbeidskontrakt (sjaa vedlagt PDF). Opprett den tilsette i Tripletex "
+        "med alle detaljar fraa kontrakten: personnummer, fodselsdato, avdeling, stillingskode, "
+        "lonn, stillingsprosent og startdato.\n\n"
+        "--- Attachment: arbeidskontrakt_nn_06.pdf ---\n"
+        "ARBEIDSKONTRAKT\nNamn: Liv Aasen\nFødselsdato: 24.07.1985\n"
+        "Personnummer: 24078559566\nE-post: liv.aasen@example.org\n"
+        "Bankkontonummer: 30392987718\nAvdeling: IT\nStillingskode: 4110\n"
+        "Årleg løn: 530 000 NOK\nStillingsprosent: 80%\nStartdato: 10.12.2026"
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_EMPLOYEE, (
+        f"Expected CREATE_EMPLOYEE, got {task.task_type}"
+    )
+    assert task.fields.get("first_name") or task.fields.get("firstName"), "Missing first name"
+    assert task.fields.get("last_name") or task.fields.get("lastName"), "Missing last name"
+    assert task.fields.get("email"), "Missing email"
+
+
+class TestEmployeePayloadNoIsActive:
+    """Verify the executor doesn't include isActive in employee employments."""
+
+    def test_employee_payload_no_isActive(self):
+        from app.workflows.executor import _build_employee_payload
+        spec = {
+            "first_name": "Liv",
+            "last_name": "Aasen",
+            "email": "liv@example.org",
+            "startDate": "2026-12-10",
+            "employmentPercentage": 80.0,
+        }
+        payload = _build_employee_payload(spec, department_id=123)
+        employments = payload.get("employments", [])
+        assert len(employments) == 1, f"Expected 1 employment, got {len(employments)}"
+        assert "isActive" not in employments[0], (
+            f"isActive should not be in employments: {employments[0]}"
+        )
+
+
+class TestSupplierInvoiceFallbackPayload:
+    """Verify the supplier invoice fallback payload doesn't include dueDate."""
+
+    def test_no_dueDate_in_fallback(self):
+        from app.workflows.executor import _build_supplier_invoice_fallback_payload
+        fields = {
+            "invoiceNumber": "INV-123",
+            "invoiceDate": "2026-05-25",
+            "invoiceDueDate": "2026-06-24",
+            "amount": 13187.0,
+            "accountNumber": "6500",
+        }
+        payload = _build_supplier_invoice_fallback_payload(fields, supplier_id=999)
+        assert "dueDate" not in payload, f"dueDate should not be in fallback payload: {payload}"
+        assert payload.get("invoiceNumber") == "INV-123"
+        assert payload.get("supplier") == {"id": 999}
