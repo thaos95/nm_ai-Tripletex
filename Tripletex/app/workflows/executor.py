@@ -1272,9 +1272,50 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         amount = float(fields.get("amount", 0))
         description = fields.get("description") or "Journal entry"
         voucher_date = fields.get("date") or _today_iso()
+        dimension_name = fields.get("dimensionName")
+        dimension_values_raw = fields.get("dimensionValues", "")
+        selected_value = fields.get("selectedDimensionValue")
 
-        if debit_account and credit_account and amount:
-            # Look up account names from ledger
+        dimension_value_id = None
+
+        # Path 1: Full dimension voucher (create dimension + values + voucher)
+        if dimension_name and debit_account and amount:
+            # Step 1: Create the custom dimension
+            dim_payload = _build_dimension_payload(fields)
+            logger.info("creating_dimension payload=%s", dim_payload)
+            dim_response = client.create_resource("ledger/accountingDimensionName", dim_payload)
+            dim_id = _extract_id(dim_response)
+            operations.append(OperationResult(name="create-dimension", resource_id=dim_id, payload=dim_response))
+
+            # Step 2: Create dimension values
+            if dim_id and dimension_values_raw:
+                values = [v.strip() for v in str(dimension_values_raw).split("||") if v.strip()]
+                for val_name in values:
+                    val_payload = _build_dimension_value_payload(dim_id, val_name)
+                    logger.info("creating_dimension_value name=%s payload=%s", val_name, val_payload)
+                    val_response = client.create_resource("ledger/accountingDimensionValue", val_payload)
+                    val_id = _extract_id(val_response)
+                    operations.append(OperationResult(name="create-dimension-value", resource_id=val_id, payload=val_response))
+                    # Track the selected value ID for the voucher
+                    if selected_value and val_name == selected_value and val_id:
+                        dimension_value_id = val_id
+
+            # Step 3: Create voucher linked to dimension value
+            voucher_payload = _build_voucher_payload(
+                fields,
+                description=description,
+                account_number=str(debit_account),
+                amount=amount,
+                dimension_value_id=dimension_value_id,
+            )
+            logger.info("creating_dimension_voucher payload=%s", voucher_payload)
+            voucher_response = client.create_resource("ledger/voucher", voucher_payload)
+            operations.append(
+                OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+            )
+
+        # Path 2: Simple journal entry (debit/credit accounts, no dimension)
+        elif debit_account and credit_account and amount:
             debit_name = str(debit_account)
             credit_name = str(credit_account)
             try:
@@ -1293,7 +1334,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                         break
             except Exception:
                 pass
-            # Simple journal entry: debit one account, credit another
             voucher_payload = _compact_payload({
                 "date": voucher_date,
                 "description": description,
@@ -1310,15 +1350,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                     },
                 ],
             })
+            logger.info("creating_journal_entry payload=%s", voucher_payload)
             voucher_response = client.create_resource("ledger/voucher", voucher_payload)
             operations.append(
                 OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
             )
         else:
-            # Not enough data to create a meaningful voucher — skip
             logger.warning(
-                "dimension_voucher_skipped: missing debit=%s credit=%s amount=%s",
-                debit_account, credit_account, amount,
+                "dimension_voucher_skipped: missing debit=%s credit=%s amount=%s dimension=%s",
+                debit_account, credit_account, amount, dimension_name,
             )
 
     elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
