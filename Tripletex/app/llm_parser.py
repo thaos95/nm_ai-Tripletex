@@ -61,7 +61,7 @@ Task types and what maps to them:
 - create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura
 - create_dimension_voucher: journal entry, accrual, periodization, month-end closing, year-end adjustment, move costs between accounts, bilagføring, periodisering, månedsavslutning, kontering, Buchung
 - create_payroll_voucher: salary payment, payroll entry, lønnsbilag, lønnskjøring
-- create_travel_expense: travel claim, reiseregning, expense report, Reisekostenabrechnung
+- create_travel_expense: travel claim, reiseregning, expense report, Reisekostenabrechnung, despesa, recibo, receipt expense, kvittering, utlegg, coffee meeting expense, meal expense
 - update_travel_expense: modify existing travel expense
 - delete_travel_expense: remove travel expense
 - delete_voucher: delete/remove voucher or journal entry

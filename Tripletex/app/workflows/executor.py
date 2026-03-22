@@ -288,9 +288,11 @@ def _build_voucher_payload(
     account_number: str,
     amount: float,
     dimension_value_id: Optional[int] = None,
+    debit_account_name: str = "",
+    credit_account_name: str = "",
 ) -> Dict[str, Any]:
     debit_line: Dict[str, Any] = {
-        "account": {"number": int(account_number)},
+        "account": {"number": int(account_number), "name": debit_account_name or str(account_number)},
         "amount": abs(amount),
         "description": description,
     }
@@ -298,7 +300,7 @@ def _build_voucher_payload(
         debit_line["freeAccountingDimension1"] = {"id": dimension_value_id}
 
     credit_line: Dict[str, Any] = {
-        "account": {"number": 2400},
+        "account": {"number": 2400, "name": credit_account_name or "2400"},
         "amount": -abs(amount),
         "description": description,
     }
@@ -1249,18 +1251,37 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         voucher_date = fields.get("date") or _today_iso()
 
         if debit_account and credit_account and amount:
+            # Look up account names from ledger
+            debit_name = str(debit_account)
+            credit_name = str(credit_account)
+            try:
+                acct_resp = client.list_resource("ledger/account", fields="id,number,name", count=1, number=int(debit_account))
+                for item in acct_resp.get("values", []):
+                    if item.get("name"):
+                        debit_name = item["name"]
+                        break
+            except Exception:
+                pass
+            try:
+                acct_resp = client.list_resource("ledger/account", fields="id,number,name", count=1, number=int(credit_account))
+                for item in acct_resp.get("values", []):
+                    if item.get("name"):
+                        credit_name = item["name"]
+                        break
+            except Exception:
+                pass
             # Simple journal entry: debit one account, credit another
             voucher_payload = _compact_payload({
                 "date": voucher_date,
                 "description": description,
                 "postings": [
                     {
-                        "account": {"number": int(debit_account)},
+                        "account": {"number": int(debit_account), "name": debit_name},
                         "amount": abs(amount),
                         "description": description,
                     },
                     {
-                        "account": {"number": int(credit_account)},
+                        "account": {"number": int(credit_account), "name": credit_name},
                         "amount": -abs(amount),
                         "description": description,
                     },
