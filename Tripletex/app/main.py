@@ -151,6 +151,26 @@ def _execute(
         classified = classify_tripletex_error(exc)
         validation_msgs = extract_validation_messages(exc)
 
+        # --- Agent recovery: try lightweight agent for recoverable 422s ---
+        if classified.recoverable and exc.status_code in (400, 422) and exc.path:
+            try:
+                from app.agent.loop import agent_recover
+                LOGGER.info("AGENT_RECOVER_START path=%s", exc.path)
+                agent_result = agent_recover(
+                    client=client,
+                    task_type=str(parsed_task.task_type),
+                    method=exc.method or "POST",
+                    path=exc.path,
+                    payload=client.operations[-1].get("json") if client.operations else None,
+                    error=exc,
+                )
+                if agent_result is not None:
+                    LOGGER.info("AGENT_RECOVER_SUCCESS path=%s result_keys=%s", exc.path, list(agent_result.keys())[:5])
+                    return None, ""
+                LOGGER.info("AGENT_RECOVER_FAILED path=%s", exc.path)
+            except Exception:
+                LOGGER.exception("AGENT_RECOVER_EXCEPTION")
+
         # Build rich structured error context for retry
         rich_parts = [
             "[Execution Error]",

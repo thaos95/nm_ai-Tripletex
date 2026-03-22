@@ -149,7 +149,18 @@ class TripletexClient:
     # ------------------------------------------------------------------
 
     def create_resource(self, resource: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self.post(f"/{resource}", payload)
+        try:
+            return self.post(f"/{resource}", payload)
+        except TripletexClientError as exc:
+            if exc.status_code != 422:
+                raise
+            # Try programmatic field removal before giving up
+            from app.agent.tools import fix_payload_from_error
+            fixed = fix_payload_from_error(payload, exc)
+            if fixed is not None:
+                LOGGER.info("resilient_create retrying %s after removing rejected fields", resource)
+                return self.post(f"/{resource}", fixed)
+            raise
 
     def update_resource(self, resource: str, resource_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self.put(f"/{resource}/{resource_id}", payload)
