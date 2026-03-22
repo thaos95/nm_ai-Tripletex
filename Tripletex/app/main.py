@@ -9,6 +9,11 @@ from fastapi.responses import JSONResponse
 from app.attachment_parser import parse_attachments, attachments_to_text
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.config import settings
+from app.error_handling import (
+    TripletexErrorCategory,
+    classify_tripletex_error,
+    extract_validation_messages,
+)
 from app.errors import MissingPrerequisiteError, UnsupportedTaskError
 from app.parser import parse_prompt
 from app.planner import build_plan
@@ -69,17 +74,12 @@ def _get_rag_context(query_text: str) -> str:
     return ""
 
 
-def _attempt_solve(
+def _parse_and_validate(
     prompt: str,
-    request: SolveRequest,
-    transport: Optional[httpx.BaseTransport],
-    attempt: int = 1,
-    thinking_level: str = "medium",
+    thinking_level: str = "high",
     extra_context: str = "",
-) -> Optional[str]:
-    """Single solve attempt. Returns None on success, or error description on failure."""
-    # KB gotchas are now in the LLM system prompt (llm_parser._get_system_prompt()).
-    # Only RAG context and retry error context are injected into the user message.
+) -> Optional["ParsedTask"]:
+    """Parse prompt with RAG context and validate. Returns normalized task or None."""
     effective_prompt = prompt
     context_parts = []
 
@@ -91,26 +91,35 @@ def _attempt_solve(
         context_parts.append(extra_context)
 
     if context_parts:
-        effective_prompt = f"{prompt}\n\n[API Context]\n" + "\n\n".join(context_parts)
+        effective_prompt = "{0}\n\n[API Context]\n{1}".format(prompt, "\n\n".join(context_parts))
 
     parsed_task = parse_prompt(effective_prompt, thinking_level=thinking_level)
-    _log_parsed_task(parsed_task, attempt)
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
-        LOGGER.warning("attempt=%d task classified as UNSUPPORTED", attempt)
-        return "unsupported"
+        LOGGER.warning("task classified as UNSUPPORTED")
+        return None
 
     validation = validate_and_normalize_task(parsed_task)
     if validation.blocking_error:
-        LOGGER.warning("attempt=%d VALIDATION_BLOCKED: %s", attempt, validation.blocking_error)
-        return "validation: {0}".format(validation.blocking_error)
+        LOGGER.warning("VALIDATION_BLOCKED: %s", validation.blocking_error)
+        return None
 
-    parsed_task = validation.parsed_task
-    # Log again after validation (fields may have been normalized)
-    _log_parsed_task(parsed_task, attempt)
+    return validation.parsed_task
 
+
+_NON_RECOVERABLE_CATEGORIES = {
+    TripletexErrorCategory.UNAUTHORIZED,
+    TripletexErrorCategory.TIMEOUT,
+    TripletexErrorCategory.SERVER_ERROR,
+    TripletexErrorCategory.VALIDATION_ENVIRONMENT,
+}
+
+
+def _execute(
+    parsed_task, prompt: str, request: SolveRequest, transport,
+) -> tuple:
+    """Execute plan. Returns (error_string, rich_context) or (None, '')."""
     plan = build_plan(parsed_task, raw_prompt=prompt)
-
     client = TripletexClient(
         base_url=str(request.tripletex_credentials.base_url),
         session_token=request.tripletex_credentials.session_token,
@@ -122,23 +131,51 @@ def _attempt_solve(
         op_names = [op.name for op in result.operations]
         op_ids = [op.resource_id for op in result.operations]
         LOGGER.info(
-            "EXECUTION attempt=%d task_type=%s operations=%s resource_ids=%s error=%s api_calls=%d",
-            attempt, result.task_type, op_names, op_ids, result.error, len(client.operations),
+            "EXECUTION task_type=%s operations=%s resource_ids=%s error=%s api_calls=%d",
+            result.task_type, op_names, op_ids, result.error, len(client.operations),
         )
         if result.error:
-            return "execution: {0}".format(result.error)
+            return "execution: {0}".format(result.error), ""
         if len(result.operations) == 0:
-            return "execution: zero operations"
-        return None  # success
+            return "execution: zero operations", ""
+        return None, ""
     except MissingPrerequisiteError as exc:
-        LOGGER.error("PREREQUISITE_ERROR attempt=%d %s", attempt, exc)
-        return "prerequisite: {0}".format(str(exc)[:200])
+        LOGGER.error("PREREQUISITE_ERROR %s", exc)
+        rich = "[Execution Error]\nType: Missing prerequisite\nDetail: {0}".format(str(exc))
+        return "prerequisite: {0}".format(str(exc)[:200]), rich
     except TripletexClientError as exc:
         LOGGER.error(
-            "EXECUTION_ERROR attempt=%d status=%s path=%s response=%s",
-            attempt, exc.status_code, exc.path, (exc.response_text or "")[:2000],
+            "EXECUTION_ERROR status=%s path=%s response=%s",
+            exc.status_code, exc.path, (exc.response_text or "")[:2000],
         )
-        return "api_error: {0} {1} {2}".format(exc.status_code, exc.path, str(exc)[:200])
+        classified = classify_tripletex_error(exc)
+        validation_msgs = extract_validation_messages(exc)
+
+        # Build rich structured error context for retry
+        rich_parts = [
+            "[Execution Error]",
+            "Category: {0}".format(classified.category.value),
+            "Status: {0}".format(exc.status_code),
+            "Path: {0}".format(exc.path),
+            "Summary: {0}".format(classified.summary),
+        ]
+        if validation_msgs:
+            rich_parts.append("Validation messages:")
+            for msg in validation_msgs:
+                rich_parts.append("- {0}".format(msg))
+        if not classified.recoverable:
+            rich_parts.append("This error is NOT recoverable by re-parsing.")
+
+        rich_context = "\n".join(rich_parts)
+        LOGGER.info("RICH_ERROR_CONTEXT category=%s recoverable=%s msgs=%s",
+                     classified.category.value, classified.recoverable, validation_msgs)
+
+        error_str = "api_error: {0} {1} {2}".format(exc.status_code, exc.path, str(exc)[:200])
+
+        if classified.category in _NON_RECOVERABLE_CATEGORIES:
+            return error_str, ""  # empty rich context signals non-recoverable
+
+        return error_str, rich_context
     finally:
         client.close()
 
@@ -165,24 +202,37 @@ async def solve(
             enriched_prompt = "{0}\n\n{1}".format(request.prompt, attachment_text)
             LOGGER.info("ATTACHMENTS enriched prompt with %d chars of attachment text", len(attachment_text))
 
-        # 2. First attempt
-        error = _attempt_solve(enriched_prompt, request, transport, attempt=1)
+        # 2. Smart parse (medium + validation loop with high refinement)
+        parsed = _parse_and_validate(enriched_prompt)
+        if parsed is None:
+            return SolveResponse(status="completed")
 
-        # 3. Retry on failure (a 0-score failure is always worse than retrying)
-        if error and error != "unsupported":
-            # Query RAG with the specific error for targeted retry context
-            error_rag = _get_rag_context(error[:200])
-            LOGGER.info("RETRY first_error=%s thinking=high", error)
-            try:
-                error2 = _attempt_solve(
-                    enriched_prompt, request, transport,
-                    attempt=2, thinking_level="high",
-                    extra_context=error_rag,
-                )
+        _log_parsed_task(parsed, 1)
+
+        # 3. Execute once
+        error, rich_context = _execute(parsed, enriched_prompt, request, transport)
+        if error is None:
+            return SolveResponse(status="completed")
+
+        # 4. Skip retry for non-recoverable errors (no rich_context = non-recoverable)
+        if not rich_context:
+            LOGGER.warning("NON_RECOVERABLE: %s", error)
+            return SolveResponse(status="completed")
+
+        # 5. Retry with rich structured error context
+        LOGGER.info("RETRY first_error=%s", error)
+        error_rag = _get_rag_context(error[:200])
+        full_context = "{0}\n\n{1}".format(error_rag, rich_context) if error_rag else rich_context
+
+        try:
+            parsed2 = _parse_and_validate(enriched_prompt, extra_context=full_context)
+            if parsed2 is not None:
+                _log_parsed_task(parsed2, 2)
+                error2, _ = _execute(parsed2, enriched_prompt, request, transport)
                 if error2:
                     LOGGER.warning("RETRY_FAILED: %s", error2)
-            except Exception:
-                LOGGER.exception("RETRY_EXCEPTION")
+        except Exception:
+            LOGGER.exception("RETRY_EXCEPTION")
 
     except Exception:
         LOGGER.exception("SOLVE_EXCEPTION — returning completed anyway")

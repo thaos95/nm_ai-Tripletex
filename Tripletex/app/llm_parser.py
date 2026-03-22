@@ -384,3 +384,44 @@ def parse_prompt_with_llm(prompt: str, thinking_level: str = "medium") -> Option
         return result
 
     return None
+
+
+def _serialize_parsed_task(task: ParsedTask) -> str:
+    """Serialize a ParsedTask back to JSON for feeding into refinement."""
+    return json.dumps({
+        "task_type": task.task_type.value if isinstance(task.task_type, TaskType) else str(task.task_type),
+        "confidence": task.confidence,
+        "language_hint": task.language_hint,
+        "fields_json": json.dumps(task.fields, default=str, ensure_ascii=False),
+        "match_fields_json": json.dumps(task.match_fields, default=str, ensure_ascii=False),
+        "related_entities_json": json.dumps(
+            {k: dict(v) for k, v in task.related_entities.items()},
+            default=str, ensure_ascii=False,
+        ),
+        "notes": task.notes,
+    }, indent=2, ensure_ascii=False)
+
+
+def refine_parse_with_llm(
+    prompt: str,
+    previous_result: ParsedTask,
+    feedback: str,
+    thinking_level: str = "high",
+) -> Optional[ParsedTask]:
+    """Re-parse with the previous result and structured feedback injected."""
+    previous_json = _serialize_parsed_task(previous_result)
+    augmented_prompt = (
+        "{0}\n\n"
+        "[Previous Parse Attempt]\n{1}\n\n"
+        "[Issues to Fix]\n{2}\n\n"
+        "Re-parse the prompt above. Return corrected JSON only. "
+        "Keep all fields from the previous attempt that are correct. "
+        "Fix ONLY the issues listed above."
+    ).format(prompt, previous_json, feedback)
+    result = parse_prompt_with_llm(augmented_prompt, thinking_level=thinking_level)
+    if result is not None:
+        logger.info(
+            "refine_parse_success task_type=%s confidence=%.2f thinking=%s",
+            result.task_type, result.confidence, thinking_level,
+        )
+    return result

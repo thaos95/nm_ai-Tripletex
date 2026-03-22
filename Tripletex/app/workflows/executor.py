@@ -2391,7 +2391,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             fields["paidAmountCurrency"] = incl_vat
             fields["amountPaidCurrency"] = incl_vat
         if not fields.get("paymentDate"):
-        fields["paymentDate"] = fields.get("invoiceDate") or _today_iso()
+            fields["paymentDate"] = fields.get("invoiceDate") or _today_iso()
         payment_params = _build_invoice_payment_payload(fields)
         logger.info("register_payment invoice_id=%s params=%s", invoice_id, payment_params)
         response = client._request(

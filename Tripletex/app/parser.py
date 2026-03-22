@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from datetime import date, datetime
@@ -5,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.llm_parser import parse_prompt_with_llm
 from app.schemas import ParsedTask, TaskType
+
+_logger = logging.getLogger(__name__)
 
 
 EMAIL_RE = re.compile(r"[\w.\-+]+@[\w.\-]+\.\w+")
@@ -2106,6 +2109,50 @@ def _post_llm_enrichment(prompt: str, result: ParsedTask) -> ParsedTask:
     return result
 
 
+def _do_llm_parse(prompt: str, thinking_level: str) -> Optional[ParsedTask]:
+    """Single LLM parse + misclassification guard."""
+    llm_parsed = parse_prompt_with_llm(prompt, thinking_level=thinking_level)
+    if llm_parsed is None or llm_parsed.task_type == TaskType.UNSUPPORTED:
+        return None
+    return _validate_llm_result(prompt, llm_parsed)
+
+
+def _do_llm_refine(prompt: str, previous: ParsedTask, feedback: str, thinking_level: str) -> Optional[ParsedTask]:
+    """Refine a previous parse with structured feedback."""
+    from app.llm_parser import refine_parse_with_llm
+    refined = refine_parse_with_llm(prompt, previous, feedback, thinking_level=thinking_level)
+    if refined is None or refined.task_type == TaskType.UNSUPPORTED:
+        return None
+    return _validate_llm_result(prompt, refined)
+
+
+def _finalize(prompt: str, result: ParsedTask) -> ParsedTask:
+    """Apply post-LLM enrichments (run once on final result)."""
+    result = _post_llm_enrichment(prompt, result)
+    return _enrich_dimension_voucher(prompt, result)
+
+
+def _assess_parse_quality(result: ParsedTask) -> str:
+    """Run validator read-only and collect feedback for refinement.
+
+    Returns empty string if no issues found.
+    """
+    from app.validator import validate_and_normalize_task
+
+    issues = []
+
+    if result.confidence < 0.80:
+        issues.append("Low confidence ({0:.2f}). Re-examine the task type and field extraction.".format(result.confidence))
+
+    validation = validate_and_normalize_task(result)
+    if validation.blocking_error:
+        issues.append("Validation error: {0}".format(validation.blocking_error))
+    for warning in validation.warnings:
+        issues.append("Warning: {0}".format(warning))
+
+    return "\n".join(issues)
+
+
 def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
@@ -2118,16 +2165,22 @@ def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     if rule_based.task_type in (TaskType.BANK_RECONCILIATION, TaskType.CORRECT_LEDGER_ERRORS) and rule_based.confidence >= 0.9:
         return rule_based
 
-    # LLM is primary — KB context is in the LLM system prompt.
-    llm_parsed = parse_prompt_with_llm(prompt, thinking_level=thinking_level)
-    if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
-        llm_parsed = _validate_llm_result(prompt, llm_parsed)
-        llm_parsed = _post_llm_enrichment(prompt, llm_parsed)
-        # Dimension voucher enrichment — regex is more reliable for account prefix logic
-        return _enrich_dimension_voucher(prompt, llm_parsed)
+    # Step 1: Parse at medium thinking
+    result = _do_llm_parse(prompt, "medium")
+    if result is None:
+        return _enrich_dimension_voucher(prompt, rule_based)
 
-    # LLM failed or returned unsupported — fall back to rule-based
-    return _enrich_dimension_voucher(prompt, rule_based)
+    result = _finalize(prompt, result)
+
+    # Step 2: Validate before execution — refine if blocked
+    feedback = _assess_parse_quality(result)
+    if feedback and thinking_level == "high":
+        _logger.info("REFINE_PARSE feedback=%s", feedback[:200])
+        refined = _do_llm_refine(prompt, result, feedback, "high")
+        if refined is not None:
+            result = _finalize(prompt, refined)
+
+    return result
 
 
 def _validate_llm_result(prompt: str, result: ParsedTask) -> ParsedTask:
