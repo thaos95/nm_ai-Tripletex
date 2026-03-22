@@ -297,6 +297,66 @@ def test_month_end_close_es_classifies_and_extracts_accounts():
     assert task.task_type != TaskType.UNSUPPORTED
     assert task.fields.get("debitAccountNumber") is not None or task.fields.get("accountNumber") is not None
     assert task.fields.get("amount") is not None
+    # Multi-entry: should have journalEntries with at least 2 entries
+    entries = task.fields.get("journalEntries", [])
+    assert len(entries) >= 2, f"Expected >=2 journal entries, got {len(entries)}: {entries}"
+    # Check accrual entry
+    accrual = entries[0]
+    assert accrual["amount"] == 12500.0
+    assert accrual["creditAccountNumber"] == "1720"
+    # Check depreciation entry
+    depreciation = entries[1]
+    assert depreciation["debitAccountNumber"] == "6020"
+    assert depreciation["amount"] == round(61400.0 / (10 * 12), 2)  # 511.67
+
+
+# ---------------------------------------------------------------------------
+# MONTH END CLOSE (German) — multi-voucher with 3 entries
+# ---------------------------------------------------------------------------
+def test_month_end_close_de_multi_voucher():
+    prompt = (
+        "Führen Sie den Monatsabschluss für März 2026 durch. Buchen Sie die "
+        "Rechnungsabgrenzung (6150 EUR monatlich von Konto 1720 auf Aufwandskonto 6300). "
+        "Buchen Sie die monatliche Abschreibung eines Anlageguts mit Anschaffungskosten "
+        "48000 EUR und Nutzungsdauer 8 Jahre (lineare Abschreibung auf Konto 6010). "
+        "Buchen Sie auch eine Gehaltsrückstellung (Aufwandskonto 5000, Konto aufgelaufene "
+        "Gehälter 2900)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER
+    entries = task.fields.get("journalEntries", [])
+    assert len(entries) >= 2, f"Expected >=2 journal entries, got {len(entries)}: {entries}"
+    # Accrual: debit 6300, credit 1720, amount 6150
+    assert entries[0]["debitAccountNumber"] == "6300"
+    assert entries[0]["creditAccountNumber"] == "1720"
+    assert entries[0]["amount"] == 6150.0
+    # Depreciation: debit 6010, amount = 48000 / (8*12) = 500
+    assert entries[1]["debitAccountNumber"] == "6010"
+    assert entries[1]["amount"] == 500.0
+
+
+# ---------------------------------------------------------------------------
+# MONTH END CLOSE (Norwegian) — multi-voucher
+# ---------------------------------------------------------------------------
+def test_month_end_close_nb_multi_voucher():
+    prompt = (
+        "Utfør månedsavslutning for mars 2026. Periodiser forskuddsbetalt kostnad "
+        "(10150 kr per måned fra konto 1720 til kostnadskonto 6300). Bokfør månedlig "
+        "avskrivning av et anleggsmiddel med anskaffelseskostnad 72000 kr og levetid "
+        "6 år (lineær avskrivning til konto 6020). Bokfør også en lønnsavsetning "
+        "(debiteringskonto 5000, krediteringskonto 2900)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER
+    entries = task.fields.get("journalEntries", [])
+    assert len(entries) >= 2, f"Expected >=2 journal entries, got {len(entries)}: {entries}"
+    # Accrual: debit 6300, credit 1720, amount 10150
+    assert entries[0]["debitAccountNumber"] == "6300"
+    assert entries[0]["creditAccountNumber"] == "1720"
+    assert entries[0]["amount"] == 10150.0
+    # Depreciation: debit 6020, amount = 72000 / (6*12) = 1000
+    assert entries[1]["debitAccountNumber"] == "6020"
+    assert entries[1]["amount"] == 1000.0
 
 
 # ---------------------------------------------------------------------------

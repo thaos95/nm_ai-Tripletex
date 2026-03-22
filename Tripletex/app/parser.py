@@ -1,7 +1,7 @@
 import re
 import unicodedata
 from datetime import date, datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.llm_parser import parse_prompt_with_llm
 from app.schemas import ParsedTask, TaskType
@@ -754,6 +754,139 @@ def _extract_day_count(prompt: str) -> Optional[int]:
 
 def _extract_currency_amounts(prompt: str) -> List[float]:
     return [float(value.replace(",", ".")) for value in re.findall(r"(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)]
+
+
+def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
+    """Extract multiple journal entries from month-end close / multi-voucher prompts.
+
+    Looks for patterns like:
+      - accrual/periodization from account X to account Y, amount Z
+      - depreciation of asset with cost C and useful life L years to account D
+      - salary provision debit 5000 credit 2900
+    Returns a list of dicts with debitAccountNumber, creditAccountNumber, amount, description.
+    """
+    entries: List[Dict[str, Any]] = []
+    lowered = prompt.lower()
+
+    # --- 1. Accrual / periodization ---
+    # Patterns: "periodisering ... X kr ... fra konto AAAA til ... BBBB"
+    # "periodificación ... X NOK ... de la cuenta AAAA a gasto/cuenta BBBB"
+    # "Rechnungsabgrenzung ... X EUR ... von Konto AAAA auf ... BBBB"
+    # Two-account accrual patterns (amount + two account numbers in same sentence)
+    accrual_two_acct_patterns = [
+        # "periodisering ... AMOUNT ... konto AAAA til kostnadskonto BBBB" (within same sentence)
+        r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
+    ]
+    for pattern in accrual_two_acct_patterns:
+        m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
+        if m:
+            amount_str = m.group(1).replace(",", ".")
+            acct_a = m.group(2)
+            acct_b = m.group(3)
+            if acct_b.startswith(("6", "7")) and acct_a.startswith(("1", "2")):
+                debit, credit = acct_b, acct_a
+            elif acct_a.startswith(("6", "7")) and acct_b.startswith(("1", "2")):
+                debit, credit = acct_a, acct_b
+            else:
+                credit, debit = acct_a, acct_b
+            entries.append({
+                "debitAccountNumber": debit,
+                "creditAccountNumber": credit,
+                "amount": float(amount_str),
+                "description": "Accrual / periodization",
+            })
+            break
+
+    # Single-account accrual pattern: "de la cuenta 1720 a gasto" — only source account, expense account default 6300
+    if not entries:
+        accrual_single_patterns = [
+            r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:a\s+(?:gasto|kostnad|expense|aufwand|charge|despesa))",
+        ]
+        for pattern in accrual_single_patterns:
+            m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
+            if m:
+                amount_str = m.group(1).replace(",", ".")
+                source_acct = m.group(2)  # e.g. 1720 (prepaid)
+                entries.append({
+                    "debitAccountNumber": "6300",  # default expense account
+                    "creditAccountNumber": source_acct,
+                    "amount": float(amount_str),
+                    "description": "Accrual / periodization",
+                })
+                break
+
+    # --- 2. Depreciation ---
+    # "depreciation ... cost AMOUNT ... life L years ... account XXXX"
+    depreciation_patterns = [
+        r"(?:depreciaci[oó]n|avskrivning|abschreibung|amortissement|deprecia[çc][aã]o)\w*.*?(?:kostnad|costo|cost[eo]|Anschaffungskosten|co[uû]t|adquisici[oó]n)\w*\s*(?:de\s+)?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b.*?(\d+)\s*(?:[aå]r|a[nñ]os|years?|jahre?|ans|anos)\b.*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
+    ]
+    for pattern in depreciation_patterns:
+        m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
+        if m:
+            cost = float(m.group(1).replace(",", "."))
+            years = int(m.group(2))
+            target_account = m.group(3)
+            monthly_depreciation = round(cost / (years * 12), 2)
+            # Debit = depreciation expense account, credit = accumulated depreciation (usually 10xx or 12xx)
+            # The target_account is the expense account (6xxx)
+            # Asset account: look for another 4-digit number near "asset" / "aktiva" / "anlegg"
+            asset_account = None
+            asset_match = re.search(
+                r"(?:aktiva|anlegg\w*|anlage\w*|activo\w*|asset|immobilis\w*)\w*.*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
+                prompt, re.IGNORECASE | re.DOTALL,
+            )
+            if asset_match and asset_match.group(1) != target_account:
+                asset_account = asset_match.group(1)
+            if not asset_account:
+                # Default: credit the standard accumulated depreciation account 1200
+                asset_account = "1200"
+            entries.append({
+                "debitAccountNumber": target_account,
+                "creditAccountNumber": asset_account,
+                "amount": monthly_depreciation,
+                "description": "Monthly depreciation",
+            })
+            break
+
+    # --- 3. Salary provision ---
+    # "salary provision debit 5000 credit 2900" or "provisión salarial ... 5000 ... 2900"
+    salary_patterns = [
+        r"(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning).*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
+        r"(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning)\w*\s+(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
+    ]
+    for pattern in salary_patterns:
+        m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
+        if m:
+            acct_a = m.group(1)
+            acct_b = m.group(2)
+            # 5xxx = expense (debit), 2xxx = liability (credit)
+            if acct_a.startswith("5") and acct_b.startswith("2"):
+                debit, credit = acct_a, acct_b
+            elif acct_b.startswith("5") and acct_a.startswith("2"):
+                debit, credit = acct_b, acct_a
+            else:
+                debit, credit = acct_a, acct_b
+            # Amount: look for salary-related amount near this section, or use accrual amount as fallback
+            salary_amount = None
+            sal_amount_match = re.search(
+                r"(?:l[oø]nn|salary|salario|gehalt|salaire)\w*.*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b",
+                prompt, re.IGNORECASE | re.DOTALL,
+            )
+            if sal_amount_match:
+                salary_amount = float(sal_amount_match.group(1).replace(",", "."))
+            if salary_amount is None and entries:
+                salary_amount = entries[0]["amount"]  # Use accrual amount as fallback
+            if salary_amount is None:
+                salary_amount = 0.0
+            entries.append({
+                "debitAccountNumber": debit,
+                "creditAccountNumber": credit,
+                "amount": salary_amount,
+                "description": "Salary provision",
+            })
+            break
+
+    return entries
 
 
 def _extract_dimension_name(prompt: str) -> Optional[str]:
@@ -1644,6 +1777,19 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         amount = _extract_amount(prompt)
         if amount is not None:
             fields["amount"] = amount
+
+        # Multi-entry detection for month-end close prompts
+        journal_entries = _extract_journal_entries(prompt)
+        if len(journal_entries) >= 2:
+            fields["journalEntries"] = journal_entries
+            # Use first entry as primary debit/credit/amount if not already set
+            if not fields.get("debitAccountNumber"):
+                fields["debitAccountNumber"] = journal_entries[0]["debitAccountNumber"]
+            if not fields.get("creditAccountNumber"):
+                fields["creditAccountNumber"] = journal_entries[0]["creditAccountNumber"]
+            if not fields.get("amount"):
+                fields["amount"] = journal_entries[0]["amount"]
+
         return ParsedTask(
             task_type=TaskType.CREATE_DIMENSION_VOUCHER,
             confidence=0.74,
@@ -1808,6 +1954,24 @@ def _merge_rule_fields(llm_result: ParsedTask, rule_result: ParsedTask) -> Parse
     return llm_result
 
 
+def _enrich_dimension_voucher(prompt: str, result: ParsedTask) -> ParsedTask:
+    """For dimension voucher tasks, extract multi-entry journal entries from the raw prompt."""
+    if result.task_type != TaskType.CREATE_DIMENSION_VOUCHER:
+        return result
+    if result.fields.get("journalEntries"):
+        return result  # already extracted (e.g. by rule-based parser)
+    entries = _extract_journal_entries(prompt)
+    if len(entries) >= 2:
+        result.fields["journalEntries"] = entries
+        if not result.fields.get("debitAccountNumber"):
+            result.fields["debitAccountNumber"] = entries[0]["debitAccountNumber"]
+        if not result.fields.get("creditAccountNumber"):
+            result.fields["creditAccountNumber"] = entries[0]["creditAccountNumber"]
+        if not result.fields.get("amount"):
+            result.fields["amount"] = entries[0]["amount"]
+    return result
+
+
 def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
@@ -1826,10 +1990,12 @@ def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
         # Post-LLM validation: catch known misclassifications
         llm_parsed = _validate_llm_result(prompt, llm_parsed)
         # Merge any extra fields from rule-based parser
-        return _merge_rule_fields(llm_parsed, rule_based)
+        merged = _merge_rule_fields(llm_parsed, rule_based)
+        # Enrich dimension voucher with multi-entry extraction
+        return _enrich_dimension_voucher(prompt, merged)
 
     # LLM failed or returned unsupported — fall back to rule-based
-    return rule_based
+    return _enrich_dimension_voucher(prompt, rule_based)
 
 
 def _validate_llm_result(prompt: str, result: ParsedTask) -> ParsedTask:

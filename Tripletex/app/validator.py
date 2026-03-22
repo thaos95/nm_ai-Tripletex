@@ -229,6 +229,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.CREATE_DIMENSION_VOUCHER: {
             "date", "dimensionName", "dimensionValues", "selectedDimensionValue",
             "accountNumber", "amount", "description", "debitAccountNumber", "creditAccountNumber",
+            "journalEntries",
         },
         TaskType.CREATE_PAYROLL_VOUCHER: {
             "date", "amount", "baseSalaryCurrency", "bonusCurrency", "email",

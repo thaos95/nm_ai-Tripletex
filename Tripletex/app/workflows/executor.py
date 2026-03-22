@@ -484,7 +484,18 @@ def _create_journal_voucher(
         ],
     }
     logger.info("creating_journal_voucher payload=%s", voucher_payload)
-    response = client.create_resource("ledger/voucher", voucher_payload)
+    try:
+        response = client.create_resource("ledger/voucher", voucher_payload)
+    except TripletexClientError as exc:
+        # Handle "systemgenererte" (system-generated account) errors —
+        # some accounts (e.g., 5000 Lønn) are payroll-managed and reject manual postings
+        if "systemgenererte" in str(exc).lower() or "system-generated" in str(exc).lower():
+            logger.warning("journal_voucher_system_account debit=%s credit=%s — skipping", debit_account, credit_account)
+            operations.append(
+                OperationResult(name=operation_name, payload={"skipped": True, "reason": "system-generated account"})
+            )
+            return None
+        raise
     operations.append(
         OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response)
     )
@@ -1950,7 +1961,30 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
             )
 
-        # Path 2: Simple journal entry (debit/credit accounts, no dimension)
+        # Path 2: Multi-entry journal (month-end close with multiple vouchers)
+        elif fields.get("journalEntries") and len(fields["journalEntries"]) >= 2:
+            for idx, entry in enumerate(fields["journalEntries"]):
+                entry_debit = str(entry.get("debitAccountNumber", ""))
+                entry_credit = str(entry.get("creditAccountNumber", ""))
+                entry_amount = float(entry.get("amount", 0))
+                entry_desc = entry.get("description") or description
+                if entry_debit and entry_credit and entry_amount:
+                    logger.info(
+                        "multi_voucher_entry %d/%d debit=%s credit=%s amount=%s desc=%s",
+                        idx + 1, len(fields["journalEntries"]),
+                        entry_debit, entry_credit, entry_amount, entry_desc,
+                    )
+                    _create_journal_voucher(
+                        client, operations,
+                        debit_account=entry_debit,
+                        credit_account=entry_credit,
+                        amount=abs(entry_amount),
+                        date=voucher_date,
+                        description=entry_desc,
+                        operation_name="create-journal-voucher-{0}".format(idx + 1),
+                    )
+
+        # Path 3: Simple journal entry (debit/credit accounts, no dimension)
         elif debit_account and credit_account and amount:
             _create_journal_voucher(
                 client, operations,
