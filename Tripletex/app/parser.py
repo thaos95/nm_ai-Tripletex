@@ -1003,6 +1003,21 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             notes=["Prompt matches unsupported intent pattern."],
         )
 
+    # Ledger error correction detection
+    ledger_correction_tokens = [
+        "feil i hovudboka", "feil i hovedboka", "feil i hovedbok", "feil i hovudbok",
+        "korriger alle feil", "rette bilag", "correcting entries",
+        "duplikat bilag", "feil konto", "feil beløp", "manglande mva",
+    ]
+    if any(token in lowered for token in ledger_correction_tokens):
+        return ParsedTask(
+            task_type=TaskType.CORRECT_LEDGER_ERRORS,
+            confidence=0.90,
+            language_hint=_language_hint(prompt),
+            fields=_extract_common_fields(prompt),
+            notes=["Ledger error correction detected."],
+        )
+
     # Bank reconciliation detection — before general classification
     bank_recon_tokens = [
         "avstem", "bankutskrift", "bank statement", "reconcil", "rapprochez",
@@ -1797,8 +1812,12 @@ def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
 
-    # Fast exit for clearly unsupported prompts (bank reconciliation, etc.)
+    # Fast exit for clearly unsupported prompts
     if rule_based.task_type == TaskType.UNSUPPORTED and rule_based.confidence >= 0.9:
+        return rule_based
+
+    # Fast exit for specialized task types that the LLM doesn't know about
+    if rule_based.task_type in (TaskType.BANK_RECONCILIATION, TaskType.CORRECT_LEDGER_ERRORS) and rule_based.confidence >= 0.9:
         return rule_based
 
     # LLM is primary — try it first

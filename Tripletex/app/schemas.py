@@ -37,6 +37,7 @@ class TaskType(str, Enum):
     LIST_LEDGER_ACCOUNTS = "list_ledger_accounts"
     LIST_LEDGER_POSTINGS = "list_ledger_postings"
     BANK_RECONCILIATION = "bank_reconciliation"
+    CORRECT_LEDGER_ERRORS = "correct_ledger_errors"
     UNSUPPORTED = "unsupported"
 
 

@@ -233,6 +233,24 @@ def test_bank_reconciliation_fr_not_unsupported():
 
 
 # ---------------------------------------------------------------------------
+# CORRECT_LEDGER_ERRORS — was classified as LIST_LEDGER_POSTINGS
+# ---------------------------------------------------------------------------
+def test_correct_ledger_errors_nn():
+    """Ledger audit with 4 specific errors to correct. Was misclassified as list postings."""
+    prompt = (
+        "Me har oppdaga feil i hovudboka for januar og februar 2026. "
+        "Gå gjennom alle bilag og finn dei 4 feila: "
+        "ei postering på feil konto (konto 6500 brukt i staden for 6540, beløp 3450 kr), "
+        "eit duplikat bilag (konto 6540, beløp 3700 kr), "
+        "ei manglande MVA-linje (konto 6540, beløp ekskl. 23500 kr manglar MVA på konto 2710), "
+        "og eit feil beløp (konto 7300, 18600 kr bokført i staden for 11550 kr). "
+        "Korriger alle feil med rette bilag."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CORRECT_LEDGER_ERRORS
+
+
+# ---------------------------------------------------------------------------
 # REGISTER_PAYMENT — fields must not be dropped
 # ---------------------------------------------------------------------------
 def test_register_payment_preserves_all_fields():

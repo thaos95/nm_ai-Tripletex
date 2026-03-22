@@ -1111,6 +1111,171 @@ def _parse_csv_from_prompt(raw_prompt: str) -> List[Dict[str, str]]:
     return []
 
 
+def _execute_ledger_corrections(
+    client: TripletexClient,
+    fields: Dict[str, Any],
+    related: Dict[str, Any],
+    plan: Any,
+    operations: list,
+) -> None:
+    """Parse correction instructions from the prompt and create correcting journal vouchers.
+
+    Handles 4 common error types:
+    1. Wrong account: reverse old account posting, create correct one
+    2. Duplicate voucher: create reversing entry
+    3. Missing VAT line: create VAT posting
+    4. Wrong amount: create correcting entry for the difference
+    """
+    import re
+
+    raw = plan.raw_prompt or ""
+    today = _today_iso()
+    # Try to find a date range in the prompt for context
+    voucher_date = fields.get("dateTo") or fields.get("date") or today
+
+    # --- 1. Wrong account correction ---
+    # Pattern: "konto XXXX brukt i staden for YYYY, beløp ZZZZ"
+    wrong_account = re.search(
+        r'konto\s+(\d{4})\s+(?:brukt|brukt i staden for|instead of|i stedet for)\s+(?:konto\s+)?(\d{4})[^0-9]*?(\d[\d\s,.]*)\s*kr',
+        raw, re.IGNORECASE,
+    )
+    if wrong_account:
+        wrong_acct = wrong_account.group(1)
+        correct_acct = wrong_account.group(2)
+        amount = float(wrong_account.group(3).replace(",", ".").replace(" ", ""))
+        logger.info("ledger_correction: wrong_account %s→%s amount=%s", wrong_acct, correct_acct, amount)
+        try:
+            _create_journal_voucher(
+                client, operations,
+                debit_account=correct_acct, credit_account=wrong_acct,
+                amount=amount, date=voucher_date,
+                description="Korreksjon: feil konto {0} → {1}".format(wrong_acct, correct_acct),
+                operation_name="correct-wrong-account",
+            )
+        except TripletexClientError as exc:
+            logger.warning("ledger_correction: wrong_account failed: %s", exc)
+
+    # --- 2. Duplicate voucher reversal ---
+    # Pattern: "duplikat bilag (konto XXXX, beløp YYYY)"
+    duplicate = re.search(
+        r'duplikat\w*\s+(?:bilag|voucher)[^0-9]*?(?:konto\s+)?(\d{4})[^0-9]*?(\d[\d\s,.]*)\s*kr',
+        raw, re.IGNORECASE,
+    )
+    if duplicate:
+        dup_acct = duplicate.group(1)
+        dup_amount = float(duplicate.group(2).replace(",", ".").replace(" ", ""))
+        logger.info("ledger_correction: duplicate on account %s amount=%s", dup_acct, dup_amount)
+        # First try to find and delete the duplicate voucher
+        deleted = False
+        try:
+            postings = client.list_resource(
+                "ledger/posting", fields="id,voucher,account,amount,*",
+                count=500,
+                dateFrom=fields.get("dateFrom", "2026-01-01"),
+                dateTo=fields.get("dateTo", today),
+            ).get("values", [])
+            # Find postings on this account with this amount
+            candidates = []
+            for p in postings:
+                acct = p.get("account", {})
+                acct_num = acct.get("number") if isinstance(acct, dict) else None
+                p_amount = p.get("amount")
+                if acct_num == int(dup_acct) and p_amount is not None and abs(float(p_amount) - dup_amount) < 0.01:
+                    voucher = p.get("voucher", {})
+                    voucher_id = voucher.get("id") if isinstance(voucher, dict) else None
+                    if voucher_id:
+                        candidates.append(voucher_id)
+            # If we found 2+ matching vouchers, delete the last one (the duplicate)
+            if len(candidates) >= 2:
+                dup_voucher_id = candidates[-1]
+                try:
+                    client._request("DELETE", "/ledger/voucher/{0}".format(dup_voucher_id))
+                    operations.append(OperationResult(
+                        name="delete-duplicate-voucher", resource_id=dup_voucher_id, payload={"deleted": True}
+                    ))
+                    deleted = True
+                    logger.info("ledger_correction: deleted duplicate voucher %s", dup_voucher_id)
+                except TripletexClientError as exc:
+                    logger.warning("ledger_correction: delete duplicate failed: %s", exc)
+        except TripletexClientError as exc:
+            logger.warning("ledger_correction: listing postings for duplicate failed: %s", exc)
+
+        # Fallback: create reversing entry if delete didn't work
+        if not deleted:
+            try:
+                # Reverse the duplicate by crediting the expense account and debiting a clearing account
+                _create_journal_voucher(
+                    client, operations,
+                    debit_account="1920", credit_account=dup_acct,
+                    amount=dup_amount, date=voucher_date,
+                    description="Korreksjon: reversering av duplikat bilag konto {0}".format(dup_acct),
+                    operation_name="reverse-duplicate-voucher",
+                )
+            except TripletexClientError as exc:
+                logger.warning("ledger_correction: reverse duplicate failed: %s", exc)
+
+    # --- 3. Missing VAT line ---
+    # Pattern: "manglande MVA-linje (konto XXXX, beløp ekskl. YYYY kr manglar MVA på konto ZZZZ)"
+    missing_vat = re.search(
+        r'mangl\w+\s+(?:mva|MVA)[^0-9]*?(?:konto\s+)?(\d{4})[^0-9]*?(\d[\d\s,.]*)\s*kr[^0-9]*?(?:mva|MVA)\s+(?:på\s+)?(?:konto\s+)?(\d{4})',
+        raw, re.IGNORECASE,
+    )
+    if missing_vat:
+        expense_acct = missing_vat.group(1)
+        excl_amount = float(missing_vat.group(2).replace(",", ".").replace(" ", ""))
+        vat_acct = missing_vat.group(3)
+        vat_amount = excl_amount * 0.25  # Standard 25% MVA
+        logger.info("ledger_correction: missing VAT on %s, amount excl=%s, vat_acct=%s, vat=%s",
+                     expense_acct, excl_amount, vat_acct, vat_amount)
+        try:
+            _create_journal_voucher(
+                client, operations,
+                debit_account=vat_acct, credit_account="1920",
+                amount=vat_amount, date=voucher_date,
+                description="Korreksjon: manglande MVA for konto {0}, beløp {1} kr".format(expense_acct, excl_amount),
+                operation_name="correct-missing-vat",
+            )
+        except TripletexClientError as exc:
+            logger.warning("ledger_correction: missing VAT failed: %s", exc)
+
+    # --- 4. Wrong amount correction ---
+    # Pattern: "feil beløp (konto XXXX, YYYY kr bokført i staden for ZZZZ kr)"
+    wrong_amount = re.search(
+        r'feil\s+beløp[^0-9]*?(?:konto\s+)?(\d{4})[^0-9]*?(\d[\d\s,.]*)\s*kr\s+(?:bokført|bokfort|registrert)[^0-9]*?(\d[\d\s,.]*)\s*kr',
+        raw, re.IGNORECASE,
+    )
+    if wrong_amount:
+        acct = wrong_amount.group(1)
+        booked = float(wrong_amount.group(2).replace(",", ".").replace(" ", ""))
+        correct = float(wrong_amount.group(3).replace(",", ".").replace(" ", ""))
+        diff = booked - correct
+        logger.info("ledger_correction: wrong_amount on %s, booked=%s, correct=%s, diff=%s", acct, booked, correct, diff)
+        if diff > 0:
+            # Overpaid — credit the account to reduce
+            try:
+                _create_journal_voucher(
+                    client, operations,
+                    debit_account="1920", credit_account=acct,
+                    amount=abs(diff), date=voucher_date,
+                    description="Korreksjon: feil beløp konto {0}, {1} → {2} kr".format(acct, booked, correct),
+                    operation_name="correct-wrong-amount",
+                )
+            except TripletexClientError as exc:
+                logger.warning("ledger_correction: wrong_amount failed: %s", exc)
+        elif diff < 0:
+            # Underpaid — debit the account to increase
+            try:
+                _create_journal_voucher(
+                    client, operations,
+                    debit_account=acct, credit_account="1920",
+                    amount=abs(diff), date=voucher_date,
+                    description="Korreksjon: feil beløp konto {0}, {1} → {2} kr".format(acct, booked, correct),
+                    operation_name="correct-wrong-amount",
+                )
+            except TripletexClientError as exc:
+                logger.warning("ledger_correction: wrong_amount failed: %s", exc)
+
+
 def _execute_bank_reconciliation(
     client: TripletexClient,
     fields: Dict[str, Any],
@@ -1898,6 +2063,9 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             params=payment_params,
         )
         operations.append(OperationResult(name="register-payment", resource_id=invoice_id, payload=response))
+
+    elif task_type == TaskType.CORRECT_LEDGER_ERRORS:
+        _execute_ledger_corrections(client, fields, related, plan, operations)
 
     elif task_type == TaskType.BANK_RECONCILIATION:
         _execute_bank_reconciliation(client, fields, related, plan, operations)

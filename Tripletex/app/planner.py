@@ -13,6 +13,14 @@ LOGGER = logging.getLogger(__name__)
 
 TASK_KEYWORDS: List[Tuple[str, List[str]]] = [
     # --- specific multi-word patterns first ---
+    ("correct_ledger_errors", [
+        "feil i hovudboka", "feil i hovedboka", "feil i hovedbok", "feil i hovudbok",
+        "korriger alle feil", "korriger feil", "correct errors", "correct the errors",
+        "korrigere feil", "rette bilag", "correcting entries", "correcting vouchers",
+        "fehler korrigieren", "erreurs comptables", "corrigir erros",
+        "duplikat bilag", "duplicate voucher", "feil konto", "wrong account",
+        "manglande mva", "missing vat", "feil beløp", "wrong amount",
+    ]),
     ("bank_reconciliation", [
         "avstem", "bankutskrift", "bank statement", "reconcil",
         "bank reconcil", "rapprochez", "relevé bancaire", "releve bancaire",
@@ -204,6 +212,7 @@ PLAN_STEPS: Dict[str, List[str]] = {
     "reverse_payment": ["resolve-reversal-customer", "resolve-reversal-invoice", "reverse-payment"],
     "list_ledger_accounts": ["list-ledger-accounts"],
     "list_ledger_postings": ["list-ledger-postings"],
+    "correct_ledger_errors": ["list-postings", "create-correcting-vouchers"],
     "bank_reconciliation": ["parse-bank-statement", "match-invoices", "register-payments"],
     "unsupported": [],
 }
