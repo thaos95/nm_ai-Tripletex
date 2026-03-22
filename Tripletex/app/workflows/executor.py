@@ -182,12 +182,8 @@ def _build_incoming_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
     description = fields.get("description") or fields.get("invoiceDescription")
     if description:
         line["description"] = description
-    vat_pct = fields.get("vatPercentage")
-    if vat_pct is not None:
-        # Map percentage to Tripletex vatType ID (incomingInvoice doesn't accept vatPercentage)
-        vat_type_id = _vat_percentage_to_type_id(float(vat_pct))
-        if vat_type_id is not None:
-            line["vatType"] = {"id": vat_type_id}
+    # Note: incomingInvoice orderLines do NOT accept vatType or vatPercentage.
+    # VAT is derived from the account number by Tripletex.
     return [_compact_payload(line)]
 
 

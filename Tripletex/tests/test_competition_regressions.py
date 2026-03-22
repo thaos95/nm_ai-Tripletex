@@ -298,6 +298,41 @@ def test_month_end_close_es_classifies_and_extracts_accounts():
 
 
 # ---------------------------------------------------------------------------
+# CREATE_CUSTOMER — German supplier registration (competition: 6/6)
+# ---------------------------------------------------------------------------
+def test_create_customer_de_supplier():
+    prompt = (
+        "Registrieren Sie den Lieferanten Brückentor GmbH mit der Organisationsnummer "
+        "949229122. E-Mail: faktura@brckentorgmbh.no."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_CUSTOMER
+    assert task.fields.get("name") == "Brückentor GmbH"
+    assert task.fields.get("organizationNumber") == "949229122"
+    assert task.fields.get("email") == "faktura@brckentorgmbh.no"
+    assert task.fields.get("isSupplier") is True
+
+
+# ---------------------------------------------------------------------------
+# CREATE_SUPPLIER_INVOICE — Spanish, 25% VAT (competition: 0/8, vatType rejected)
+# ---------------------------------------------------------------------------
+def test_create_supplier_invoice_es_with_vat():
+    prompt = (
+        "Hemos recibido la factura INV-2026-9187 del proveedor Montaña SL "
+        "(org. nº 884646979) por 19500 NOK con IVA incluido. El importe "
+        "corresponde a servicios de oficina (cuenta 7300). Registre la factura "
+        "del proveedor con el IVA soportado correcto (25 %)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_SUPPLIER_INVOICE
+    assert task.fields.get("amount") == 19500.0
+    assert task.fields.get("accountNumber") == "7300"
+    assert task.fields.get("invoiceNumber") == "INV-2026-9187"
+    assert "supplier" in task.related_entities
+    assert task.related_entities["supplier"].get("organizationNumber") == "884646979"
+
+
+# ---------------------------------------------------------------------------
 # Validator whitelist: ensure no critical fields are silently dropped
 # ---------------------------------------------------------------------------
 class TestValidatorPreservesFields:
