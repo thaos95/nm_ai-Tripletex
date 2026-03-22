@@ -134,18 +134,6 @@ def _normalize_related_entity_aliases(task: ParsedTask) -> None:
                 value["addressStreet"] = value.pop("address")
 
 
-def _drop_unknown_fields(task: ParsedTask, allowed_fields: Dict[TaskType, Set[str]]) -> List[str]:
-    warnings: List[str] = []
-    allowed = allowed_fields.get(task.task_type)
-    if allowed is None:
-        return warnings
-
-    for key in list(task.fields):
-        if key not in allowed:
-            task.fields.pop(key)
-            warnings.append("Dropped unsupported field '{0}' for task {1}".format(key, task.task_type))
-    return warnings
-
 
 def _has_order_line_source(task: ParsedTask) -> bool:
     product = task.related_entities.get("product", {})
@@ -197,71 +185,6 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         normalized.fields["first_name"] = normalized.fields.pop("firstName")
     if "lastName" in normalized.fields and "last_name" not in normalized.fields:
         normalized.fields["last_name"] = normalized.fields.pop("lastName")
-
-    allowed_fields: Dict[TaskType, Set[str]] = {
-        TaskType.CREATE_EMPLOYEE: {
-            "first_name", "last_name", "email", "employee_type", "birthDate", "dateOfBirth", "startDate", "userType",
-            "nationalIdentityNumber", "bankAccountNumber", "employmentPercentage", "annualSalary", "occupationCode",
-            "workingHoursPerDay", "phoneNumberMobile", "address",
-        },
-        TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
-        TaskType.LIST_EMPLOYEES: {"fields", "count"},
-        TaskType.CREATE_CUSTOMER: {
-            "name", "email", "isCustomer", "isSupplier", "organizationNumber", "phoneNumber",
-        },
-        TaskType.UPDATE_CUSTOMER: {"phoneNumber", "email"},
-        TaskType.SEARCH_CUSTOMERS: {"fields", "count"},
-        TaskType.CREATE_PRODUCT: {"name", "priceExcludingVatCurrency", "productNumber", "vatPercentage"},
-        TaskType.CREATE_PROJECT: {"name", "startDate"},
-        TaskType.CREATE_PROJECT_BILLING: {
-            "name", "startDate", "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate",
-            "fixedPriceAmountCurrency", "billingPercentage", "hourlyRateCurrency", "amount",
-            "budget", "budgetAmount",
-        },
-        TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber", "departmentNames"},
-        TaskType.CREATE_ORDER: {"orderDate", "deliveryDate"},
-        TaskType.CREATE_INVOICE: {
-            "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate",
-            "amount", "accountNumber", "sendByEmail", "markAsPaid",
-            "paymentDate", "amountPaidCurrency", "paymentTypeId",
-            "currency", "exchangeRate",
-        },
-        TaskType.CREATE_SUPPLIER_INVOICE: {
-            "invoiceDate", "invoiceNumber", "amount", "accountNumber", "vatPercentage",
-            "description", "invoiceDescription", "invoiceDueDate",
-            "dueDate", "bankAccountNumber",
-        },
-        TaskType.CREATE_CREDIT_NOTE: {
-            "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate", "amount", "creditNote",
-        },
-        TaskType.CREATE_DIMENSION_VOUCHER: {
-            "date", "dimensionName", "dimensionValues", "selectedDimensionValue",
-            "accountNumber", "amount", "description", "debitAccountNumber", "creditAccountNumber",
-            "journalEntries",
-        },
-        TaskType.CREATE_PAYROLL_VOUCHER: {
-            "date", "amount", "baseSalaryCurrency", "bonusCurrency", "email",
-        },
-        TaskType.CREATE_TRAVEL_EXPENSE: {
-            "date", "amount", "distance", "title", "description", "name",
-            "departmentName", "vatType", "vatTypeId", "expenseDate",
-            "costDescription", "paymentType", "paymentTypeId",
-            "project", "department", "costItems",
-        },
-        TaskType.UPDATE_TRAVEL_EXPENSE: {"date", "amount", "distance", "travel_expense_id"},
-        TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},
-        TaskType.DELETE_VOUCHER: {"voucher_id"},
-        TaskType.REGISTER_PAYMENT: {
-            "paymentDate", "invoiceDate", "amount", "amountPaidCurrency",
-            "paidAmount", "paidAmountCurrency", "paymentTypeId",
-            "currency", "exchangeRate", "markAsPaid",
-            "invoiceDueDate", "orderDate", "deliveryDate",
-        },
-        TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
-        TaskType.LIST_LEDGER_POSTINGS: {"fields", "count", "period_hint", "dateFrom", "dateTo"},
-        TaskType.REVERSE_PAYMENT: {"invoiceDate", "invoiceDueDate", "orderDate", "amount", "paymentDate"},
-    }
-    warnings.extend(_drop_unknown_fields(normalized, allowed_fields))
 
     # KB-driven forbidden fields check — catch fields that would cause API errors
     try:
@@ -408,7 +331,11 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
                 first_value = str(normalized.fields["dimensionValues"]).split("||")[0]
                 normalized.fields["selectedDimensionValue"] = first_value
             if normalized.fields.get("accountNumber") is None:
-                return ValidationResult(normalized, blocking_error="Dimension voucher requires account number")
+                # Fallback: use debitAccountNumber if provided
+                if normalized.fields.get("debitAccountNumber"):
+                    normalized.fields["accountNumber"] = normalized.fields["debitAccountNumber"]
+                else:
+                    return ValidationResult(normalized, blocking_error="Dimension voucher requires account number")
             if normalized.fields.get("amount") is None:
                 return ValidationResult(normalized, blocking_error="Dimension voucher requires amount")
         elif has_debit_credit:

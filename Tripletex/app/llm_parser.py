@@ -37,7 +37,7 @@ TASK_SCHEMA = {
     ],
 }
 
-SYSTEM_PROMPT = """You classify Tripletex accounting tasks into a fixed schema.
+_SYSTEM_PROMPT_BASE = """You classify Tripletex accounting tasks into a fixed schema.
 Return only structured JSON.
 IMPORTANT: Almost every prompt maps to a supported task type. Only use "unsupported" for tasks that truly cannot map to any type below.
 Do not invent fields, entities, IDs, or prerequisites that are not grounded in the prompt.
@@ -109,6 +109,48 @@ Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt",
 User: Sett fastpris 203000 kr på prosjektet "Digital transformasjon" for Stormberg AS (org.nr 834028719). Prosjektleder er Hilde Hansen (hilde.hansen@example.org). Fakturer kunden for 75 % av fastprisen som en delbetaling.
 Assistant: {"task_type":"create_project_billing","confidence":0.93,"language_hint":"nb","fields_json":"{\\"name\\":\\"Digital transformasjon\\",\\"startDate\\":\\"2026-03-20\\",\\"invoiceDate\\":\\"2026-03-20\\",\\"invoiceDueDate\\":\\"2026-03-20\\",\\"orderDate\\":\\"2026-03-20\\",\\"deliveryDate\\":\\"2026-03-20\\",\\"fixedPriceAmountCurrency\\":203000.0,\\"billingPercentage\\":75.0,\\"amount\\":152250.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Stormberg AS\\",\\"organizationNumber\\":\\"834028719\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Hilde\\",\\"last_name\\":\\"Hansen\\",\\"email\\":\\"hilde.hansen@example.org\\"},\\"invoice\\":{\\"description\\":\\"Partial billing 75% of fixed price\\",\\"amountExcludingVatCurrency\\":152250.0},\\"order\\":{\\"description\\":\\"Partial billing 75% of fixed price\\"}}","attachments_required":false,"notes":[]}
 """
+
+
+_cached_system_prompt: Optional[str] = None
+
+
+def _build_kb_context() -> str:
+    """Build a condensed task API reference from the KB task registry."""
+    try:
+        from app.kb import load_kb
+        kb = load_kb()
+    except Exception:
+        return ""
+    if not kb:
+        return ""
+
+    lines = ["\n## Task API Reference (from KB)"]
+    for task_type, spec in kb.items():
+        lines.append("### {0}".format(task_type))
+        allowed = spec.get("allowed_parsed_fields", [])
+        if allowed:
+            lines.append("Fields: {0}".format(", ".join(allowed)))
+        forbidden = spec.get("forbidden_fields", [])
+        if forbidden:
+            lines.append("Forbidden (DO NOT include): {0}".format(", ".join(forbidden)))
+        gotchas = spec.get("gotchas", [])
+        if gotchas:
+            for g in gotchas:
+                lines.append("- {0}".format(g))
+        prereqs = spec.get("prerequisites", [])
+        if prereqs:
+            lines.append("Prerequisites: {0}".format(", ".join(prereqs)))
+    return "\n".join(lines)
+
+
+def _get_system_prompt() -> str:
+    """Return the full system prompt with KB context. Cached after first build."""
+    global _cached_system_prompt
+    if _cached_system_prompt is not None:
+        return _cached_system_prompt
+    kb_ctx = _build_kb_context()
+    _cached_system_prompt = _SYSTEM_PROMPT_BASE + kb_ctx
+    return _cached_system_prompt
 
 
 def _sanitize_scalar_mapping(value: Any) -> Dict[str, Any]:
@@ -186,7 +228,7 @@ def _parse_prompt_with_replicate(prompt: str, thinking_level: str = "medium") ->
 
     payload = {
         "input": {
-            "system_instruction": SYSTEM_PROMPT,
+            "system_instruction": _get_system_prompt(),
             "prompt": prompt,
             "temperature": 0.1,
             "top_p": 0.95,
@@ -256,7 +298,7 @@ def _parse_prompt_with_openai(prompt: str, thinking_level: str = "medium") -> Op
     payload: Dict[str, Any] = {
         "model": settings.openai_model,
         "input": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _get_system_prompt()},
             {"role": "user", "content": prompt},
         ],
         "text": {

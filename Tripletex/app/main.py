@@ -69,25 +69,6 @@ def _get_rag_context(query_text: str) -> str:
     return ""
 
 
-def _get_kb_gotchas_for_prompt(prompt: str) -> str:
-    """Use keyword detection to find likely task type, then return KB gotchas."""
-    try:
-        from app.planner import _detect_task_type
-        from app.kb import get_gotchas, get_forbidden_fields
-        task_type = _detect_task_type(prompt)
-        if task_type and task_type != "unsupported":
-            gotchas = get_gotchas(task_type)
-            forbidden = get_forbidden_fields(task_type)
-            LOGGER.info("KB_LOOKUP task=%s gotchas=%d forbidden=%s", task_type, len(gotchas), list(forbidden) if forbidden else "[]")
-            if gotchas:
-                for g in gotchas:
-                    LOGGER.info("KB_GOTCHA task=%s: %s", task_type, g[:100])
-                return "\n".join(f"- {g}" for g in gotchas)
-    except Exception:
-        pass
-    return ""
-
-
 def _attempt_solve(
     prompt: str,
     request: SolveRequest,
@@ -97,21 +78,15 @@ def _attempt_solve(
     extra_context: str = "",
 ) -> Optional[str]:
     """Single solve attempt. Returns None on success, or error description on failure."""
-    # Enrich prompt with RAG + KB context on every attempt
+    # KB gotchas are now in the LLM system prompt (llm_parser._get_system_prompt()).
+    # Only RAG context and retry error context are injected into the user message.
     effective_prompt = prompt
     context_parts = []
 
-    # Always query RAG for prompt-based context
     rag_ctx = _get_rag_context(prompt[:200])
     if rag_ctx:
         context_parts.append(rag_ctx)
 
-    # Always inject KB gotchas for the detected task type
-    gotcha_ctx = _get_kb_gotchas_for_prompt(prompt)
-    if gotcha_ctx:
-        context_parts.append(f"Known API constraints:\n{gotcha_ctx}")
-
-    # Add any extra context from retry (error-specific RAG)
     if extra_context:
         context_parts.append(extra_context)
 

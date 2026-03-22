@@ -2011,7 +2011,7 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
 
 def _merge_rule_fields(llm_result: ParsedTask, rule_result: ParsedTask) -> ParsedTask:
-    """Enrich LLM result with any extra fields the rule-based parser found."""
+    """DEPRECATED: No longer called. Kept for easy revert if needed."""
     for key, value in rule_result.fields.items():
         if key not in llm_result.fields:
             llm_result.fields[key] = value
@@ -2047,6 +2047,63 @@ def _enrich_dimension_voucher(prompt: str, result: ParsedTask) -> ParsedTask:
     return result
 
 
+def _post_llm_enrichment(prompt: str, result: ParsedTask) -> ParsedTask:
+    """Targeted post-LLM enrichments for fields the LLM doesn't extract well.
+
+    Unlike the old _merge_rule_fields() which blindly merged ALL rule-based fields,
+    this only adds specific extractions that are proven to need regex assistance.
+    """
+    # Travel expense: extract individual cost items (per diem, flight, taxi, etc.)
+    if result.task_type == TaskType.CREATE_TRAVEL_EXPENSE and not result.fields.get("costItems"):
+        day_count = _extract_day_count(prompt)
+        daily_rate = _extract_daily_rate(prompt)
+        if day_count is None:
+            fallback_day_match = re.search(r"(\d+)\s*(?:tage|tag|jours|dias|d[ií]as)\b", prompt, re.IGNORECASE)
+            if fallback_day_match:
+                day_count = int(fallback_day_match.group(1))
+        cost_items = _extract_travel_cost_items(prompt, day_count, daily_rate)
+        if cost_items:
+            result.fields["costItems"] = cost_items
+
+    # Department: extract department names from quoted strings
+    if result.task_type == TaskType.CREATE_DEPARTMENT:
+        if not result.fields.get("departmentNames") and not result.fields.get("name"):
+            names = re.findall(r'["\u201c\u201d«»]([^"\u201c\u201d«»]+)["\u201c\u201d«»]', prompt)
+            if names:
+                result.fields["departmentNames"] = "||".join(names)
+                result.fields["name"] = names[0]
+
+    # Employee: normalize birthDate alias
+    if result.task_type == TaskType.CREATE_EMPLOYEE:
+        if result.fields.get("dateOfBirth") and not result.fields.get("birthDate"):
+            result.fields["birthDate"] = result.fields["dateOfBirth"]
+
+    # Project billing: extract activity name and hours if LLM missed them
+    if result.task_type == TaskType.CREATE_PROJECT_BILLING:
+        if "activity" not in result.related_entities and "time_entry" not in result.related_entities:
+            act_match = re.search(
+                r'(?:aktiviteten?|activity|Aktivität|activit[eé]|atividade)\s*["\u201c«]([^"\u201d»]+)["\u201d»]',
+                prompt, re.IGNORECASE,
+            )
+            if act_match:
+                result.related_entities["activity"] = {"name": act_match.group(1)}
+            hours_match = re.search(r"(\d+)\s*(?:timar|timer|hours|Stunden|heures|horas)\b", prompt, re.IGNORECASE)
+            if hours_match:
+                result.related_entities.setdefault("time_entry", {})["hours"] = int(hours_match.group(1))
+
+    # Dimension voucher: extract dimension values from quoted strings if LLM missed them
+    if result.task_type == TaskType.CREATE_DIMENSION_VOUCHER:
+        if result.fields.get("dimensionName") and not result.fields.get("dimensionValues"):
+            values = re.findall(r'["\u201c\u201d«»]([^"\u201c\u201d«»]+)["\u201c\u201d«»]', prompt)
+            # Filter out the dimension name itself
+            dim_name = result.fields["dimensionName"]
+            values = [v for v in values if v.lower() != dim_name.lower()]
+            if values:
+                result.fields["dimensionValues"] = "||".join(values)
+
+    return result
+
+
 def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     prompt = _repair_mojibake(prompt)
     rule_based = parse_prompt_rule_based(prompt)
@@ -2059,15 +2116,13 @@ def parse_prompt(prompt: str, thinking_level: str = "medium") -> ParsedTask:
     if rule_based.task_type in (TaskType.BANK_RECONCILIATION, TaskType.CORRECT_LEDGER_ERRORS) and rule_based.confidence >= 0.9:
         return rule_based
 
-    # LLM is primary — try it first
+    # LLM is primary — KB context is in the LLM system prompt.
     llm_parsed = parse_prompt_with_llm(prompt, thinking_level=thinking_level)
     if llm_parsed is not None and llm_parsed.task_type != TaskType.UNSUPPORTED:
-        # Post-LLM validation: catch known misclassifications
         llm_parsed = _validate_llm_result(prompt, llm_parsed)
-        # Merge any extra fields from rule-based parser
-        merged = _merge_rule_fields(llm_parsed, rule_based)
-        # Enrich dimension voucher with multi-entry extraction
-        return _enrich_dimension_voucher(prompt, merged)
+        llm_parsed = _post_llm_enrichment(prompt, llm_parsed)
+        # Dimension voucher enrichment — regex is more reliable for account prefix logic
+        return _enrich_dimension_voucher(prompt, llm_parsed)
 
     # LLM failed or returned unsupported — fall back to rule-based
     return _enrich_dimension_voucher(prompt, rule_based)
