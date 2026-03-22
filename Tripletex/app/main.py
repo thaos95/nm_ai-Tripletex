@@ -53,19 +53,65 @@ def _log_parsed_task(parsed_task, attempt: int) -> None:
     )
 
 
+def _get_rag_context(query_text: str) -> str:
+    """Query RAG for relevant API context. Returns empty string on failure."""
+    try:
+        from app.kb.rag import query as rag_query
+        results = rag_query(query_text, top_k=3)
+        if results:
+            ctx = "\n".join(r["content"] for r in results)
+            LOGGER.info("RAG_CONTEXT query=%s results=%d chars=%d", query_text[:60], len(results), len(ctx))
+            return ctx
+    except Exception:
+        pass
+    return ""
+
+
+def _get_kb_gotchas_for_prompt(prompt: str) -> str:
+    """Use keyword detection to find likely task type, then return KB gotchas."""
+    try:
+        from app.planner import _detect_task_type
+        from app.kb import get_gotchas
+        task_type = _detect_task_type(prompt)
+        if task_type and task_type != "unsupported":
+            gotchas = get_gotchas(task_type)
+            if gotchas:
+                return "\n".join(f"- {g}" for g in gotchas)
+    except Exception:
+        pass
+    return ""
+
+
 def _attempt_solve(
     prompt: str,
     request: SolveRequest,
     transport: Optional[httpx.BaseTransport],
     attempt: int = 1,
     thinking_level: str = "medium",
-    rag_context: str = "",
+    extra_context: str = "",
 ) -> Optional[str]:
     """Single solve attempt. Returns None on success, or error description on failure."""
-    # Enrich prompt with RAG context on retry
+    # Enrich prompt with RAG + KB context on every attempt
     effective_prompt = prompt
-    if rag_context:
-        effective_prompt = f"{prompt}\n\n[API Context]\n{rag_context}"
+    context_parts = []
+
+    # Always query RAG for prompt-based context
+    rag_ctx = _get_rag_context(prompt[:200])
+    if rag_ctx:
+        context_parts.append(rag_ctx)
+
+    # Always inject KB gotchas for the detected task type
+    gotcha_ctx = _get_kb_gotchas_for_prompt(prompt)
+    if gotcha_ctx:
+        context_parts.append(f"Known API constraints:\n{gotcha_ctx}")
+
+    # Add any extra context from retry (error-specific RAG)
+    if extra_context:
+        context_parts.append(extra_context)
+
+    if context_parts:
+        effective_prompt = f"{prompt}\n\n[API Context]\n" + "\n\n".join(context_parts)
+
     parsed_task = parse_prompt(effective_prompt, thinking_level=thinking_level)
     _log_parsed_task(parsed_task, attempt)
 
@@ -143,22 +189,14 @@ async def solve(
 
         # 3. Retry on failure (a 0-score failure is always worse than retrying)
         if error and error != "unsupported":
-            # Query RAG for error-specific context to guide retry
-            rag_context = ""
-            try:
-                from app.kb.rag import query_for_error
-                rag_results = query_for_error("", error[:200], top_k=3)
-                if rag_results:
-                    rag_context = "\n".join(r["content"] for r in rag_results)
-                    LOGGER.info("RAG_CONTEXT for retry: %d results, %d chars", len(rag_results), len(rag_context))
-            except Exception:
-                pass  # RAG is optional — never block retry
+            # Query RAG with the specific error for targeted retry context
+            error_rag = _get_rag_context(error[:200])
             LOGGER.info("RETRY first_error=%s thinking=high", error)
             try:
                 error2 = _attempt_solve(
                     enriched_prompt, request, transport,
                     attempt=2, thinking_level="high",
-                    rag_context=rag_context,
+                    extra_context=error_rag,
                 )
                 if error2:
                     LOGGER.warning("RETRY_FAILED: %s", error2)
