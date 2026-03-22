@@ -55,7 +55,7 @@ Task types and what maps to them:
 - create_project: new project, set up project
 - create_department: new department, add division
 - create_order: new order, purchase order
-- create_invoice: send invoice, bill customer, faktura, factura, Rechnung
+- create_invoice: send invoice, bill customer, faktura, factura, Rechnung, sende ein faktura (Nynorsk), envoyer une facture, enviar factura. NOTE: "sende faktura" / "send invoice" = create_invoice, NOT register_payment
 - create_credit_note: credit note, kreditnota, refund invoice
 - create_project_billing: bill project, project invoice with fixed price, fastpris
 - create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura
@@ -65,7 +65,7 @@ Task types and what maps to them:
 - update_travel_expense: modify existing travel expense
 - delete_travel_expense: remove travel expense
 - delete_voucher: delete/remove voucher or journal entry
-- register_payment: record payment received on invoice, mark invoice as paid, registrer betaling
+- register_payment: record payment RECEIVED on existing invoice, mark invoice as paid, registrer betaling. NOTE: only use when explicitly about recording/registering a payment on an existing invoice, NOT for sending/creating invoices
 - reverse_payment: undo/reverse a payment, tilbakefør betaling
 - list_ledger_accounts: show chart of accounts, list accounts, kontoplan
 - list_ledger_postings: show ledger entries, list postings, hovedbok, analyze costs/revenue over period. Use fields dateFrom/dateTo for date ranges.
