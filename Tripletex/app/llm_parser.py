@@ -45,7 +45,7 @@ Prefer conservative extraction over speculative extraction.
 When a prompt implies a prerequisite-aware workflow, choose the final supported task and include enough related_entities for the deterministic executor to create prerequisites.
 
 Task types and what maps to them:
-- create_employee: hire, add staff, register employee, new worker
+- create_employee: hire, add staff, register employee, new worker, onboarding from offer letter/PDF. Extract all fields from PDF/attachment text: first_name, last_name, dateOfBirth, startDate, annualSalary, employmentPercentage, occupationCode, workingHoursPerDay. Put department in related_entities.
 - update_employee: change employee details, update address/phone/email
 - list_employees: show employees, list staff
 - create_customer: new customer, add client, register company as customer
@@ -53,15 +53,15 @@ Task types and what maps to them:
 - search_customers: find customer, look up client
 - create_product: new product, add item/service
 - create_project: new project, set up project
-- create_department: new department, add division
+- create_department: new department, add division. For MULTIPLE departments, put all names in departmentNames field with || separator (e.g. "Økonomi||Lager||IT") and set name to the first one.
 - create_order: new order, purchase order
 - create_invoice: send invoice, bill customer, faktura, factura, Rechnung, sende ein faktura (Nynorsk), envoyer une facture, enviar factura. NOTE: "sende faktura" / "send invoice" = create_invoice, NOT register_payment
 - create_credit_note: credit note, kreditnota, refund invoice
-- create_project_billing: bill project, project invoice with fixed price, fastpris
-- create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura
+- create_project_billing: bill project, project invoice with fixed price, fastpris, hourly billing with time entries. For hourly billing: extract activity name and hours into related_entities (activity:{name}, time_entry:{hours}). Calculate amount = hours × hourlyRate.
+- create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura. MUST include invoiceNumber and amount. Put supplier in related_entities with isSupplier:true. Account number goes in accountNumber field (e.g. "7300").
 - create_dimension_voucher: journal entry, accrual, periodization, month-end closing, year-end adjustment, move costs between accounts, bilagføring, periodisering, månedsavslutning, kontering, Buchung, Monatsabschluss, Rechnungsabgrenzung. IMPORTANT: Always extract debitAccountNumber and creditAccountNumber from the prompt (these are the account numbers to debit and credit). Also extract amount and date. For month-end close prompts with MULTIPLE journal entries (accrual + depreciation + salary provision), put them in a journalEntries array in fields: [{"debitAccountNumber":"6300","creditAccountNumber":"1720","amount":10150,"description":"Accrual"},{"debitAccountNumber":"6020","creditAccountNumber":"1200","amount":512,"description":"Depreciation"},...]. For depreciation, calculate monthly amount = cost / (useful_life_years * 12).
 - create_payroll_voucher: salary payment, payroll entry, lønnsbilag, lønnskjøring
-- create_travel_expense: travel claim, reiseregning, expense report, Reisekostenabrechnung, despesa, recibo, receipt expense, kvittering, utlegg, coffee meeting expense, meal expense, bokføre kvittering. Use fields: title, description, amount, departmentName, vatType
+- create_travel_expense: travel claim, reiseregning, forretningsreise, viaje de negocios, Geschäftsreise, expense report, Reisekostenabrechnung, despesa, recibo, receipt expense, kvittering, utlegg, coffee meeting expense, meal expense, bokføre kvittering. Use fields: title, description, amount, startDate, endDate. For multi-day trips with per diem + expenses, calculate total amount (days × daily rate + individual expenses).
 - update_travel_expense: modify existing travel expense
 - delete_travel_expense: remove travel expense
 - delete_voucher: delete/remove voucher or journal entry
@@ -108,6 +108,27 @@ Assistant: {"task_type":"create_project","confidence":0.93,"language_hint":"pt",
 
 User: Sett fastpris 203000 kr på prosjektet "Digital transformasjon" for Stormberg AS (org.nr 834028719). Prosjektleder er Hilde Hansen (hilde.hansen@example.org). Fakturer kunden for 75 % av fastprisen som en delbetaling.
 Assistant: {"task_type":"create_project_billing","confidence":0.93,"language_hint":"nb","fields_json":"{\\"name\\":\\"Digital transformasjon\\",\\"startDate\\":\\"2026-03-20\\",\\"invoiceDate\\":\\"2026-03-20\\",\\"invoiceDueDate\\":\\"2026-03-20\\",\\"orderDate\\":\\"2026-03-20\\",\\"deliveryDate\\":\\"2026-03-20\\",\\"fixedPriceAmountCurrency\\":203000.0,\\"billingPercentage\\":75.0,\\"amount\\":152250.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Stormberg AS\\",\\"organizationNumber\\":\\"834028719\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Hilde\\",\\"last_name\\":\\"Hansen\\",\\"email\\":\\"hilde.hansen@example.org\\"},\\"invoice\\":{\\"description\\":\\"Partial billing 75% of fixed price\\",\\"amountExcludingVatCurrency\\":152250.0},\\"order\\":{\\"description\\":\\"Partial billing 75% of fixed price\\"}}","attachments_required":false,"notes":[]}
+
+User: Vous avez recu une lettre d'offre pour un nouvel employe. Creez l'employe, attribuez le departement, configurez les details d'emploi.\n\n--- Attachment: tilbudsbrev_fr_01.pdf ---\nNom: Arthur Leroy\nDate de naissance: 30/05/1999\nDépartement: Drift\nDate de début: 01/01/2026\nSalaire annuel: 540 000 NOK\nHeures de travail: 7,5 heures/jour\nPoste: 1234
+Assistant: {"task_type":"create_employee","confidence":0.98,"language_hint":"fr","fields_json":"{\\"first_name\\":\\"Arthur\\",\\"last_name\\":\\"Leroy\\",\\"dateOfBirth\\":\\"1999-05-30\\",\\"startDate\\":\\"2026-01-01\\",\\"annualSalary\\":540000.0,\\"workingHoursPerDay\\":7.5,\\"occupationCode\\":\\"1234\\"}","match_fields_json":"{}","related_entities_json":"{\\"department\\":{\\"name\\":\\"Drift\\"}}","attachments_required":true,"notes":["Extract all fields from PDF attachment text"]}
+
+User: Registre un viaje de negocios de 4 días para el empleado Martín Rodríguez (martin.rodriguez@example.org), del 2026-03-10 al 2026-03-13. Dieta diaria: 400 NOK. Billete de avión: 4000 NOK. Taxi: 450 NOK.
+Assistant: {"task_type":"create_travel_expense","confidence":0.95,"language_hint":"es","fields_json":"{\\"title\\":\\"Viaje de negocios\\",\\"amount\\":6050.0,\\"startDate\\":\\"2026-03-10\\",\\"endDate\\":\\"2026-03-13\\"}","match_fields_json":"{}","related_entities_json":"{\\"employee\\":{\\"first_name\\":\\"Martín\\",\\"last_name\\":\\"Rodríguez\\",\\"email\\":\\"martin.rodriguez@example.org\\"}}","attachments_required":false,"notes":["Per diem: 4 days × 400 = 1600 NOK","Flight: 4000 NOK","Taxi: 450 NOK","Total: 6050 NOK"]}
+
+User: Vi har mottatt faktura nr. 2026-0042 fra leverandøren Norsk Kontor AS (org.nr 923456789) på 18500 NOK. Kontofør på konto 7300. Forfallsdato: 2026-04-15.
+Assistant: {"task_type":"create_supplier_invoice","confidence":0.96,"language_hint":"nb","fields_json":"{\\"invoiceNumber\\":\\"2026-0042\\",\\"amount\\":18500.0,\\"accountNumber\\":\\"7300\\",\\"invoiceDueDate\\":\\"2026-04-15\\"}","match_fields_json":"{}","related_entities_json":"{\\"supplier\\":{\\"name\\":\\"Norsk Kontor AS\\",\\"organizationNumber\\":\\"923456789\\",\\"isSupplier\\":true}}","attachments_required":false,"notes":["Supplier invoice uses /incomingInvoice endpoint with invoiceHeader wrapper"]}
+
+User: Créez trois départements dans Tripletex : "Økonomi", "Lager" et "IT".
+Assistant: {"task_type":"create_department","confidence":0.95,"language_hint":"fr","fields_json":"{\\"name\\":\\"Økonomi\\",\\"departmentNames\\":\\"Økonomi||Lager||IT\\"}","match_fields_json":"{}","related_entities_json":"{}","attachments_required":false,"notes":["Multiple departments requested — use departmentNames with || separator"]}
+
+User: Erstellen Sie eine neue Dimension "Kostenstelle" mit den Werten "Marketing", "Vertrieb" und "IT". Buchen Sie einen Beleg über 15000 NOK vom Konto 7100 auf das Konto 2400, zugeordnet zur Kostenstelle Marketing.
+Assistant: {"task_type":"create_dimension_voucher","confidence":0.95,"language_hint":"de","fields_json":"{\\"amount\\":15000.0,\\"debitAccountNumber\\":\\"7100\\",\\"creditAccountNumber\\":\\"2400\\",\\"accountNumber\\":\\"7100\\",\\"dimensionName\\":\\"Kostenstelle\\",\\"dimensionValues\\":\\"Marketing||Vertrieb||IT\\",\\"selectedDimensionValue\\":\\"Marketing\\",\\"description\\":\\"Buchung Kostenstelle Marketing\\"}","match_fields_json":"{}","related_entities_json":"{}","attachments_required":false,"notes":["Dimension voucher with dimension values — include dimensionName, dimensionValues (|| separated), and selectedDimensionValue"]}
+
+User: Registrer 28 timar for Bjørn Kvamme (bjrn.kvamme@example.org) på aktiviteten "Analyse" i prosjektet "Datamigrering" for Fjelltopp AS (org.nr 986191127). Timesats: 1200 kr/t. Generer ein prosjektfaktura til kunden basert på dei registrerte timane.
+Assistant: {"task_type":"create_project_billing","confidence":0.95,"language_hint":"nn","fields_json":"{\\"name\\":\\"Datamigrering\\",\\"hourlyRateCurrency\\":1200.0,\\"amount\\":33600.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Fjelltopp AS\\",\\"organizationNumber\\":\\"986191127\\",\\"isCustomer\\":true},\\"project_manager\\":{\\"first_name\\":\\"Bjørn\\",\\"last_name\\":\\"Kvamme\\",\\"email\\":\\"bjrn.kvamme@example.org\\"},\\"activity\\":{\\"name\\":\\"Analyse\\"},\\"time_entry\\":{\\"hours\\":28},\\"invoice\\":{\\"description\\":\\"Prosjektfaktura Datamigrering\\",\\"amountExcludingVatCurrency\\":33600.0},\\"order\\":{\\"description\\":\\"Prosjektfaktura Datamigrering\\"}}","attachments_required":false,"notes":["Extract activity name and hours into related_entities","amount = hours × hourlyRate = 28 × 1200 = 33600"]}
+
+User: Kunden Eichenhof GmbH (Org.-Nr. 951753159) hat eine Rechnung über 19500 NOK für "Cloud-Speicherdienst" erhalten. Erstellen Sie eine Gutschrift für diese Rechnung.
+Assistant: {"task_type":"create_credit_note","confidence":0.94,"language_hint":"de","fields_json":"{\\"amount\\":19500.0}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Eichenhof GmbH\\",\\"organizationNumber\\":\\"951753159\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"Cloud-Speicherdienst\\",\\"amountExcludingVatCurrency\\":19500.0}}","attachments_required":false,"notes":["Credit note: find the original invoice first, then call POST /invoice/{id}/:createCreditNote"]}
 """
 
 
