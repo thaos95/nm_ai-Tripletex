@@ -984,9 +984,10 @@ def _resolve_invoice_for_payment_reversal(
     invoice = filtered[0] if filtered else None
     invoice_id = invoice.get("id") if invoice else None
     logger.info(
-        "resolve_invoice matched=%d invoice_id=%s amount=%s desc=%s",
+        "resolve_invoice matched=%d invoice_id=%s amount=%s amount_incl_vat=%s desc=%s",
         len(filtered), invoice_id,
         _candidate_amount(invoice) if invoice else None,
+        invoice.get("amount") if invoice else None,
         _candidate_description(invoice)[:100] if invoice else None,
     )
     operations.append(
@@ -996,7 +997,7 @@ def _resolve_invoice_for_payment_reversal(
             payload={"invoice": invoice, "matched_count": len(filtered)},
         )
     )
-    return int(invoice_id) if invoice_id is not None else None
+    return invoice
 
 
 def _build_reverse_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -1300,9 +1301,18 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if customer_id is None:
             raise TripletexClientError(message="Reverse payment requires resolvable customer")
-        invoice_id = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
-        if invoice_id is None:
+        invoice_data = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
+        if invoice_data is None:
             raise TripletexClientError(message="Reverse payment requires resolvable invoice")
+        invoice_id = int(invoice_data.get("id"))
+        # Use the actual invoice amount (incl. VAT) for the payment reversal
+        invoice_amount = invoice_data.get("amount") or invoice_data.get("amountOutstanding")
+        original_amount = fields.get("amount")
+        if invoice_amount is not None:
+            fields = dict(fields)  # copy to avoid mutating original
+            fields["amount"] = float(invoice_amount)
+            logger.info("reverse_payment using invoice amount_incl_vat=%s instead of parsed=%s",
+                        invoice_amount, original_amount)
         _reverse_invoice_payment(client, invoice_id, fields, operations)
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
@@ -1628,9 +1638,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         if customer_id is None:
             raise TripletexClientError(message="Register payment requires resolvable customer")
-        invoice_id = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
-        if invoice_id is None:
+        invoice_data = _resolve_invoice_for_payment_reversal(client, customer_id, fields, related, operations)
+        if invoice_data is None:
             raise TripletexClientError(message="Register payment requires resolvable invoice")
+        invoice_id = int(invoice_data.get("id"))
+        # Use the actual invoice amount (incl. VAT) for the payment
+        invoice_amount = invoice_data.get("amount") or invoice_data.get("amountOutstanding")
+        if invoice_amount is not None:
+            fields = dict(fields)
+            fields["amount"] = float(invoice_amount)
         fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
         payment_params = _build_invoice_payment_payload(fields)
         logger.info("register_payment invoice_id=%s params=%s", invoice_id, payment_params)
