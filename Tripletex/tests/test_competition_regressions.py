@@ -74,6 +74,26 @@ def test_create_supplier_invoice_preserves_vat_and_account():
     assert task.fields.get("invoiceNumber") is not None or task.fields.get("description") is not None
 
 
+def test_supplier_invoice_nb_with_vat_and_account():
+    """Supplier invoice with vatPercentage and account number.
+    vatPercentage was being sent as-is to the API which rejects it —
+    must be mapped to vatType ID."""
+    prompt = (
+        "Vi har mottatt faktura INV-2026-8551 fra leverandøren Bergvik AS "
+        "(org.nr 989568469) på 14850 kr inklusiv MVA. Beløpet gjelder "
+        "kontortjenester (konto 6300). Registrer leverandørfakturaen med "
+        "korrekt inngående MVA (25 %)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_SUPPLIER_INVOICE
+    assert task.fields.get("invoiceNumber") == "INV-2026-8551"
+    assert task.fields.get("amount") == 14850.0
+    assert task.fields.get("accountNumber") == "6300"
+    assert task.fields.get("vatPercentage") == 25.0
+    assert "supplier" in task.related_entities
+    assert task.related_entities["supplier"].get("organizationNumber") == "989568469"
+
+
 # ---------------------------------------------------------------------------
 # CREATE_DIMENSION_VOUCHER — debitAccountNumber was being dropped
 # ---------------------------------------------------------------------------

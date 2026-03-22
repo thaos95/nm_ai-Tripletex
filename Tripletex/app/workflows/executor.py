@@ -184,8 +184,26 @@ def _build_incoming_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
         line["description"] = description
     vat_pct = fields.get("vatPercentage")
     if vat_pct is not None:
-        line["vatPercentage"] = float(vat_pct)
+        # Map percentage to Tripletex vatType ID (incomingInvoice doesn't accept vatPercentage)
+        vat_type_id = _vat_percentage_to_type_id(float(vat_pct))
+        if vat_type_id is not None:
+            line["vatType"] = {"id": vat_type_id}
     return [_compact_payload(line)]
+
+
+# Standard Norwegian VAT type mappings
+_VAT_TYPE_MAP = {
+    25: 3,   # 25% MVA (standard)
+    15: 4,   # 15% MVA (food)
+    12: 32,  # 12% MVA (transport/hotels)
+    0: 6,    # 0% MVA (exempt)
+}
+
+
+def _vat_percentage_to_type_id(pct: float) -> Optional[int]:
+    """Convert a VAT percentage to Tripletex vatType ID."""
+    rounded = round(pct)
+    return _VAT_TYPE_MAP.get(rounded)
 
 
 def _validate_supplier_invoice_fields(fields: Dict[str, Any]) -> None:
