@@ -835,6 +835,8 @@ def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
     accrual_two_acct_patterns = [
         # "periodisering ... AMOUNT ... konto AAAA til kostnadskonto BBBB" (within same sentence)
         r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
+        # English: "accrual reversal ... from account AAAA ... account BBBB"
+        r"(?:accrual)\s+\w*\s*\([^)]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^)]*?(?:account)\s+(\d{4})\b[^)]*?(?:account)\s+(\d{4})\b",
     ]
     for pattern in accrual_two_acct_patterns:
         m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
@@ -859,7 +861,7 @@ def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
     # Single-account accrual pattern: "de la cuenta 1720 a gasto" / "fra konto 1720 til kostkonto"
     if not entries:
         accrual_single_patterns = [
-            r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:(?:a|til)\s+(?:gasto|kostnad\w*|kostkonto|kostnadskonto|utgiftskonto|expense|aufwand\w*|charge|despesa|d[ée]pense))",
+            r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:(?:a|to|til|auf|vers|para)\s+(?:gasto|kostnad\w*|kostkonto|kostnadskonto|utgiftskonto|expense|aufwand\w*|charge|despesa|d[ée]pense))",
         ]
         for pattern in accrual_single_patterns:
             m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
@@ -877,7 +879,7 @@ def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
     # --- 2. Depreciation ---
     # "depreciation ... cost AMOUNT ... life L years ... account XXXX"
     depreciation_patterns = [
-        r"(?:depreciaci[oó]n|avskrivning|abschreibung|amortissement|deprecia[çc][aã]o)\w*.*?(?:kostnad|costo|cost[eo]|Anschaffungskosten|co[uû]t|adquisici[oó]n)\w*\s*(?:de\s+)?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b.*?(\d+)\s*(?:[aå]r|a[nñ]os|years?|jahre?|ans|anos)\b.*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
+        r"(?:depreciation|depreciaci[oó]n|avskrivning|abschreibung|amortissement|deprecia[çc][aã]o)\w*.*?(?:kostnad|costo|cost[eo]?|acquisition cost|Anschaffungskosten|co[uû]t|adquisici[oó]n)\w*\s*(?:de\s+|of\s+)?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b.*?(\d+)\s*(?:[aå]r|a[nñ]os|years?|jahre?|ans|anos)\b.*?(?:konto|cuenta|account|compte)\s+(\d{4})\b",
     ]
     for pattern in depreciation_patterns:
         m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
@@ -910,8 +912,8 @@ def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
     # --- 3. Salary provision ---
     # "salary provision debit 5000 credit 2900" or "provisión salarial ... 5000 ... 2900"
     salary_patterns = [
-        r"(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning).*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
-        r"(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning)\w*\s+(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
+        r"(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning|accrual).*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
+        r"(?:provisjon|provision|provisi[oó]n|R[uü]ckstellung|avsetning|accrual)\w*\s+(?:l[oø]nn\w*|salary|salario|salarial\w*|gehalt\w*|salaire)\w*.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b.*?(?:konto|cuenta|account|compte|d[ée]bit\w*|cr[ée]dit\w*|debitering\w*|kreditering\w*)?\s*(\d{4})\b",
     ]
     for pattern in salary_patterns:
         m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)

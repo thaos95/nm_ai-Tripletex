@@ -38,37 +38,76 @@ gcloud run deploy tripletex-agent --source . --region europe-north1 --allow-unau
 
 ## Architecture
 
-### Request Flow
+### LLM-First Pipeline
+
+The pipeline is **LLM-primary**: the LLM (Gemini via Replicate) is the sole classifier and field extractor. KB/RAG only provides context to help the LLM make better decisions — they never override LLM output.
 
 ```
 POST /solve (app/main.py)
   → parse_attachments(files)              # app/attachment_parser.py
-  → parse_prompt(prompt)                  # app/parser.py — rule-based + LLM
-  → validate_and_normalize_task(parsed)   # app/validator.py — field normalization
+  → parse_prompt(prompt)                  # app/parser.py — LLM primary, rule-based fallback
+    → LLM with KB-enriched system prompt  # app/llm_parser.py — _get_system_prompt()
+    → _post_llm_enrichment()              # Targeted regex for fields LLM misses
+  → validate_and_normalize_task(parsed)   # app/validator.py — normalize, don't drop
   → build_plan(parsed_task)               # app/planner.py — execution plan
   → execute_plan(client, plan)            # app/workflows/executor.py — all task logic
+  → retry on failure (thinking=high)      # RAG error context injected on retry
   → {"status": "completed"}
 ```
 
+**Context layers** (each feeds into the LLM, none overrides it):
+1. **Base prompt** (`_SYSTEM_PROMPT_BASE` in `llm_parser.py`) — task type definitions, output format, few-shot examples
+2. **KB context** (`_build_kb_context()`) — all 26 task specs from `task_registry.json` injected into system prompt
+3. **RAG context** (`_get_rag_context()` in `main.py`) — TF-IDF retrieval injected into user message; error-specific on retry
+4. **Post-LLM enrichment** (`_post_llm_enrichment()` in `parser.py`) — targeted regex for fields the LLM consistently misses
+
 ### Key Modules
 
-- **`app/parser.py`** — Main parser entry point. Rule-based field extraction with LLM fallback. Produces `ParsedTask`.
-- **`app/llm_parser.py`** — Optional LLM-based parser (OpenAI/Replicate). Called by parser.py when API key is set.
-- **`app/planner.py`** — `build_plan()` converts `ParsedTask` → `ExecutionPlan` with named steps. Also has keyword-based task detection.
-- **`app/validator.py`** — Normalizes fields (phones, dates, org numbers), validates prerequisites, drops unknown fields.
-- **`app/workflows/executor.py`** — Core execution engine. Handles all 24 task types with prerequisite resolution (customer, employee, product, etc.).
+- **`app/llm_parser.py`** — LLM parser with dynamic KB-enriched system prompt. `_get_system_prompt()` concatenates base instructions + KB context. Contains all few-shot examples.
+- **`app/parser.py`** — Entry point. LLM primary, rule-based fallback for UNSUPPORTED/BANK_RECONCILIATION/CORRECT_LEDGER_ERRORS. `_post_llm_enrichment()` adds targeted regex extractions.
+- **`app/planner.py`** — `build_plan()` converts `ParsedTask` → `ExecutionPlan` with named steps. Also has keyword-based task detection for rule-based fallback.
+- **`app/validator.py`** — Normalizes fields (phones, dates, org numbers), validates prerequisites. Does NOT drop unknown fields — only removes KB-defined `forbidden_fields`.
+- **`app/workflows/executor.py`** — Core execution engine. Handles all task types with prerequisite resolution and system-generated account retry logic.
+- **`app/kb/task_registry.json`** — Source of truth for task specs: allowed fields, forbidden fields, gotchas, prerequisites.
+- **`app/kb/rag.py`** — TF-IDF cosine similarity search over `rag_index.json` for error context on retry.
 - **`app/clients/tripletex.py`** — HTTP client with `find_single`, `create_resource`, `update_resource` etc. Tracks all operations.
 - **`app/schemas.py`** — `TaskType` enum (25 types), `ParsedTask`, `ExecutionPlan`, `SolveRequest`/`SolveResponse`.
 - **`app/error_handling.py`** — Classifies Tripletex API errors into categories (recoverable vs terminal).
-- **`app/actions/`** — Legacy handlers (bypassed by workflows/executor). Kept for backward compatibility.
 
 ### Adding a New Task Type
 
 1. Add value to `TaskType` enum in `app/schemas.py`.
 2. Add keyword patterns in `app/planner.py` `TASK_KEYWORDS` and step sequence in `PLAN_STEPS`.
 3. Add execution logic in `app/workflows/executor.py` `execute_plan()`.
-4. Add field extraction in `app/parser.py` if needed.
-5. Add validation rules in `app/validator.py` if needed.
+4. Add a few-shot example in `app/llm_parser.py` `_SYSTEM_PROMPT_BASE`.
+5. Add task spec in `app/kb/task_registry.json` (allowed fields, forbidden fields, gotchas).
+6. Add validation rules in `app/validator.py` if needed.
+7. Add post-LLM regex in `app/parser.py` `_post_llm_enrichment()` if the LLM consistently misses a field.
+
+### Improving the Pipeline (Layer by Layer)
+
+When a competition run fails, diagnose which layer needs fixing:
+
+**1. Base Prompt** (`app/llm_parser.py` → `_SYSTEM_PROMPT_BASE`)
+- Add/update **few-shot examples** for task types the LLM misclassifies or extracts poorly. Currently 14 examples covering all major task types.
+- Update **task type descriptions** in the prompt to clarify ambiguous cases.
+- Keep examples realistic — use actual competition prompts that failed.
+
+**2. KB Task Registry** (`app/kb/task_registry.json`)
+- Add **gotchas** when the Tripletex API rejects a field placement (e.g., "startDate belongs in employments array, not top level").
+- Add **forbidden_fields** when the API returns 422 for a specific field — the validator auto-removes these.
+- Update **allowed_parsed_fields** to document what the executor actually uses.
+- KB context is injected into the LLM system prompt via `_build_kb_context()` — changes take effect immediately.
+
+**3. RAG Index** (`app/kb/rag_index.json`)
+- Add entries for **specific API errors** the agent encounters — RAG is queried with the error message on retry.
+- Rebuild: add new entries directly to `rag_index.json` (TF-IDF index, no separate build step).
+- RAG context goes in the **user message** (not system prompt) — useful for error-specific retry context.
+
+**4. Post-LLM Enrichment** (`app/parser.py` → `_post_llm_enrichment()`)
+- Add **targeted regex** only for fields the LLM consistently fails to extract across multiple languages.
+- Current enrichments: travel cost items, department names, employee birthDate alias, project billing activity/hours, dimension voucher values.
+- Keep minimal — every enrichment here is a workaround for an LLM limitation.
 
 ## Configuration
 
@@ -107,17 +146,16 @@ This agent is built for the NM i AI Tripletex competition. Key scoring rules:
 When a competition run fails, follow this cycle:
 
 1. **User pastes logs** from a failed competition submission.
-2. **Fix the bug** (parser, validator whitelist, executor payload, etc.).
-3. **Add a regression test** in `tests/test_competition_regressions.py` using the exact prompt from the logs.
-4. **Run only the new test** (`pytest tests/test_competition_regressions.py::test_name -v`) — fast iteration.
-5. **Commit and push** to both `origin` and `vercel` remotes.
-6. **Run the full regression suite occasionally** (`pytest tests/test_competition_regressions.py -v`) — not every fix, just periodically to catch regressions. The full suite takes ~2.5 min.
+2. **Diagnose the layer**: Is it LLM misclassification (base prompt)? Missing field (post-LLM enrichment)? API rejection (KB forbidden fields / executor)? Wrong account (system-generated account retry)?
+3. **Fix the appropriate layer** — see "Improving the Pipeline" above.
+4. **Add a regression test** in `tests/test_competition_regressions.py` using the exact prompt from the logs.
+5. **Run only the new test** (`pytest tests/test_competition_regressions.py::test_name -v`) — fast iteration.
+6. **Commit and push** to both `origin` and `vercel` remotes (`git push vercel <branch>:main`).
+7. **Run the full regression suite occasionally** (`pytest tests/test_competition_regressions.py -v`) — not every fix, just periodically.
 
 The regression test file has two sections:
 - **Prompt-level tests**: call `parse_prompt()` → `validate_and_normalize_task()` on real competition prompts. No API calls.
-- **Validator whitelist tests** (`TestValidatorPreservesFields`): construct a `ParsedTask` directly and verify the validator doesn't drop fields the executor needs.
-
-When adding a new test, pick the right section. If the bug was the validator dropping a field, add a whitelist test. If the bug was the parser misclassifying or missing extraction, add a prompt-level test.
+- **Validator tests**: construct a `ParsedTask` directly and verify the validator normalizes correctly without dropping fields.
 
 ## Branch and PR Conventions
 

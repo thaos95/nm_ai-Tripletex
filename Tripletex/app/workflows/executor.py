@@ -204,6 +204,26 @@ def _build_incoming_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
     return [_compact_payload(line)]
 
 
+def _build_supplier_invoice_fallback_payload(fields: Dict[str, Any], supplier_id: int) -> Dict[str, Any]:
+    """Build payload for /supplierInvoice endpoint (fallback when /incomingInvoice returns 403)."""
+    today = _today_iso()
+    payload: Dict[str, Any] = {
+        "invoiceNumber": fields.get("invoiceNumber"),
+        "invoiceDate": fields.get("invoiceDate") or today,
+        "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or today,
+        "supplier": {"id": supplier_id},
+        "amountExcludingVat": fields.get("amount"),
+        "amountExcludingVatCurrency": fields.get("amount"),
+    }
+    description = fields.get("description") or fields.get("invoiceDescription")
+    if description:
+        payload["description"] = description
+    account_number = fields.get("accountNumber")
+    if account_number:
+        payload["accountId"] = int(account_number)
+    return _compact_payload(payload)
+
+
 # Standard Norwegian VAT type mappings
 _VAT_TYPE_MAP = {
     25: 3,   # 25% MVA (standard)
@@ -1842,7 +1862,17 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         _validate_supplier_invoice_fields(fields)
         payload = _build_supplier_invoice_payload(fields, supplier_id)
         logger.info("supplier_invoice_payload=%s", json.dumps(payload, ensure_ascii=False, default=str))
-        response = client.create_resource("incomingInvoice", payload)
+        try:
+            response = client.create_resource("incomingInvoice", payload)
+        except TripletexClientError as exc:
+            if exc.status_code == 403:
+                # /incomingInvoice module not enabled — fall back to /supplierInvoice
+                logger.info("incomingInvoice returned 403, falling back to supplierInvoice")
+                fallback_payload = _build_supplier_invoice_fallback_payload(fields, supplier_id)
+                logger.info("supplierInvoice_fallback_payload=%s", json.dumps(fallback_payload, ensure_ascii=False, default=str))
+                response = client.create_resource("supplierInvoice", fallback_payload)
+            else:
+                raise
         operations.append(
             OperationResult(name="create-supplier-invoice", resource_id=_extract_id(response), payload=response)
         )

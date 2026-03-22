@@ -751,3 +751,38 @@ def test_create_employee_fr_onboarding_no_email():
     assert task.fields.get("first_name") or task.fields.get("firstName"), "Missing first name"
     assert task.fields.get("email"), "Should have fallback email"
     assert "@" in task.fields["email"], f"Invalid email: {task.fields['email']}"
+
+
+def test_month_end_closing_en_extracts_journal_entries():
+    """English month-end closing with accrual reversal, depreciation, and salary accrual.
+
+    Regression: all three regex patterns in _extract_journal_entries() missed English.
+    - Accrual: (?:a|til) didn't match English 'to'
+    - Depreciation: pattern had no English 'depreciation' and cost[eo] didn't match 'cost'
+    - Salary: pattern required 'provision' but prompt says 'accrual'
+    """
+    prompt = (
+        "Perform month-end closing for March 2026. "
+        "Post accrual reversal (5450 NOK per month from account 1700 to expense). "
+        "Record monthly depreciation for a fixed asset with acquisition cost 156750 NOK "
+        "and useful life 10 years (straight-line depreciation to account 6010). "
+        "Verify that the trial balance is zero. "
+        "Also post a salary accrual (debit salary expense account 5000, credit accrued salary account 2900)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER, (
+        f"Expected CREATE_DIMENSION_VOUCHER, got {task.task_type}"
+    )
+    entries = task.fields.get("journalEntries", [])
+    assert len(entries) >= 2, f"Expected at least 2 journal entries, got {len(entries)}: {entries}"
+    # Check accrual reversal entry
+    accrual_entry = next((e for e in entries if e.get("amount") == 5450.0), None)
+    assert accrual_entry is not None, f"Missing accrual entry (5450 NOK) in {entries}"
+    # Check depreciation entry (156750 / 120 = 1306.25)
+    depr_entry = next((e for e in entries if abs(e.get("amount", 0) - 1306.25) < 0.01), None)
+    assert depr_entry is not None, f"Missing depreciation entry (1306.25) in {entries}"
+    assert depr_entry.get("debitAccountNumber") == "6010", f"Depreciation debit should be 6010, got {depr_entry}"
+    # Check salary accrual entry
+    salary_entry = next((e for e in entries if e.get("debitAccountNumber") == "5000"), None)
+    assert salary_entry is not None, f"Missing salary accrual entry (5000/2900) in {entries}"
+    assert salary_entry.get("creditAccountNumber") == "2900", f"Salary credit should be 2900, got {salary_entry}"
