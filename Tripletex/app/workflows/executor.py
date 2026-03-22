@@ -74,7 +74,8 @@ def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) 
         "firstName": spec.get("first_name"),
         "lastName": spec.get("last_name"),
         "email": spec.get("email"),
-        "dateOfBirth": spec.get("birthDate"),
+        "dateOfBirth": spec.get("birthDate") or spec.get("dateOfBirth"),
+        "startDate": spec.get("startDate") or _today_iso(),
         "userType": user_type,
         "department": {"id": department_id} if department_id is not None else None,
     }

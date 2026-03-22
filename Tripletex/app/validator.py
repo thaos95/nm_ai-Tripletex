@@ -191,7 +191,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
 
     allowed_fields: Dict[TaskType, Set[str]] = {
         TaskType.CREATE_EMPLOYEE: {
-            "first_name", "last_name", "email", "employee_type", "birthDate", "startDate", "userType",
+            "first_name", "last_name", "email", "employee_type", "birthDate", "dateOfBirth", "startDate", "userType",
         },
         TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
         TaskType.LIST_EMPLOYEES: {"fields", "count"},
