@@ -6,7 +6,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.attachment_parser import parse_attachments
+from app.attachment_parser import parse_attachments, attachments_to_text
 from app.clients.tripletex import TripletexClient, TripletexClientError
 from app.config import settings
 from app.errors import MissingPrerequisiteError, UnsupportedTaskError
@@ -122,18 +122,23 @@ async def solve(
     )
 
     try:
-        # 1. Parse attachments
+        # 1. Parse attachments and build enriched prompt
         attachments = parse_attachments(request.files)
+        attachment_text = attachments_to_text(attachments)
+        enriched_prompt = request.prompt
+        if attachment_text:
+            enriched_prompt = "{0}\n\n{1}".format(request.prompt, attachment_text)
+            LOGGER.info("ATTACHMENTS enriched prompt with %d chars of attachment text", len(attachment_text))
 
         # 2. First attempt
-        error = _attempt_solve(request.prompt, request, transport, attempt=1)
+        error = _attempt_solve(enriched_prompt, request, transport, attempt=1)
 
         # 3. Retry on failure (a 0-score failure is always worse than retrying)
         if error and error != "unsupported":
             LOGGER.info("RETRY first_error=%s thinking=high", error)
             try:
                 error2 = _attempt_solve(
-                    request.prompt, request, transport,
+                    enriched_prompt, request, transport,
                     attempt=2, thinking_level="high",
                 )
                 if error2:

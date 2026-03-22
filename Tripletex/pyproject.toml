@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.8,<2.9",
     "pydantic-settings>=2.5,<2.6",
     "uvicorn>=0.33,<0.34",
+    "pypdf>=5.0,<6.0",
 ]
 
 [project.optional-dependencies]
