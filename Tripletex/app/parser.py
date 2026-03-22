@@ -56,7 +56,7 @@ ENTITY_KEYWORDS = {
     "department": ["avdeling", "department", "departamento", "abteilung", "departement"],
     "invoice": ["faktura", "invoice", "factura", "fatura", "rechnung", "facture"],
     "order": ["ordre", "order", "pedido", "bestellung", "commande"],
-    "travel_expense": ["reiseregning", "reiserekning", "travel expense", "expense report", "viagem", "spesen"],
+    "travel_expense": ["reiseregning", "reiserekning", "travel expense", "expense report", "viagem", "spesen", "forretningsreise", "viaje de negocios", "geschäftsreise", "voyage d'affaires"],
     "voucher": ["bilag", "voucher", "comprobante", "buchung"],
     "ledger_account": ["kontoplan", "ledger account", "chart of accounts", "konti"],
     "ledger_posting": ["hovedboksposteringer", "ledger posting", "postering", "postings", "hovedbok"],
@@ -739,14 +739,18 @@ def _extract_hours(prompt: str) -> Optional[float]:
 
 
 def _extract_daily_rate(prompt: str) -> Optional[float]:
-    match = re.search(r"(?:dagssats|daily rate)\s*(?:pa|på|of|:)?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)
+    match = re.search(
+        r"(?:dagssats|dagsats|daglig\s+diett|daily\s+rate|dieta\s+diaria|indemnit[eé]\s+journali[eè]re|tagessatz|di[aá]ria)"
+        r"\s*(?:pa|på|of|de|:)?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b",
+        prompt, re.IGNORECASE,
+    )
     if not match:
         return None
     return float(match.group(1).replace(",", "."))
 
 
 def _extract_day_count(prompt: str) -> Optional[int]:
-    match = re.search(r"(\d+)\s*(?:dagar|dager|days)\b", prompt, re.IGNORECASE)
+    match = re.search(r"(\d+)\s*(?:dagar|dager|days|d[ií]as|dias|tage|jours)\b", prompt, re.IGNORECASE)
     if not match:
         return None
     return int(match.group(1))
@@ -754,6 +758,59 @@ def _extract_day_count(prompt: str) -> Optional[int]:
 
 def _extract_currency_amounts(prompt: str) -> List[float]:
     return [float(value.replace(",", ".")) for value in re.findall(r"(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", prompt, re.IGNORECASE)]
+
+
+def _extract_travel_cost_items(prompt: str, day_count: Optional[int] = None, daily_rate: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Extract individual cost items from a travel expense prompt.
+
+    Returns list of dicts: {description, amount, category}.
+    Categories: 'per_diem', 'transport', 'accommodation', 'expense'.
+    """
+    items: List[Dict[str, Any]] = []
+    lowered = prompt.lower()
+
+    # Per diem / daily allowance
+    if day_count is not None and daily_rate is not None:
+        items.append({
+            "description": "Per diem",
+            "amount": float(day_count * daily_rate),
+            "category": "per_diem",
+            "days": day_count,
+            "dailyRate": daily_rate,
+        })
+
+    # Named expense patterns: "description AMOUNT NOK/kr"
+    expense_patterns = [
+        # flight / plane ticket
+        (r"(?:billete?\s+(?:de\s+)?avi[oó]n|flybillett\w*|Flugticket\w*|billet\s+d['\u2019]avion|flight\s+ticket|plane\s+ticket|air\s+ticket|passagem\s+a[ée]rea)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Flight ticket", "transport"),
+        # taxi
+        (r"(?:taxi|drosje|Taxi)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Taxi", "transport"),
+        # hotel / accommodation
+        (r"(?:hotel\w*|hotell\w*|alojamiento|h[ée]bergement|overnatting|Unterkunft)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Hotel", "accommodation"),
+        # meal / food
+        (r"(?:comida|mat|repas|Essen|meal|m[aå]ltid|lunsj|lunch|middag|dinner)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Meal", "expense"),
+        # parking
+        (r"(?:parking|parkering|aparcamiento|stationnement)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Parking", "transport"),
+        # coffee / meeting expense
+        (r"(?:kaffe|coffee|caf[ée])\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Coffee", "expense"),
+        # toll / bompenger
+        (r"(?:bompenger|toll|peaje|p[ée]age)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:nok|kr)\b", "Toll", "transport"),
+        # generic "AMOUNT NOK description" where description comes before the amount
+        # e.g., "billete de avión 4000 NOK" — already covered above
+    ]
+
+    used_amounts: set = set()
+    for pattern, desc, cat in expense_patterns:
+        for m in re.finditer(pattern, prompt, re.IGNORECASE):
+            amt = float(m.group(1).replace(",", "."))
+            # Skip if this amount matches the daily rate (already captured as per_diem)
+            if daily_rate is not None and abs(amt - daily_rate) < 0.01:
+                continue
+            if amt not in used_amounts:
+                items.append({"description": desc, "amount": amt, "category": cat})
+                used_amounts.add(amt)
+
+    return items
 
 
 def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
@@ -1020,6 +1077,12 @@ def _score_intents(lowered: str) -> Dict[str, int]:
             "despesa de viagem",
             "relatorio de despesas",
             "relatório de despesas",
+            "forretningsreise",
+            "viaje de negocios",
+            "geschäftsreise",
+            "voyage d'affaires",
+            "viagem de negócios",
+            "viagem de negocios",
         ]
     ):
         add("travel_expense", 8)
@@ -1251,6 +1314,12 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
         or "despesa de viagem" in lowered
         or "relatorio de despesas" in lowered
         or "relatório de despesas" in lowered
+        or "forretningsreise" in lowered
+        or "viaje de negocios" in lowered
+        or "geschäftsreise" in lowered
+        or "voyage d'affaires" in lowered
+        or "viagem de negócios" in lowered
+        or "viagem de negocios" in lowered
     ):
         entity = "travel_expense"
     if "hovedboksposteringer" in lowered or "ledger posting" in lowered or "postings" in lowered:
@@ -1738,6 +1807,11 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
                 amount += sum(remaining_expenses)
         if amount is not None:
             fields["amount"] = amount
+
+        # Extract individual cost items for separate cost lines
+        cost_items = _extract_travel_cost_items(prompt, day_count, daily_rate)
+        if cost_items:
+            fields["costItems"] = cost_items
         if "date" in fields:
             fields["expenseDate"] = fields.pop("date")
         if "kilometer" in lowered or "km" in lowered:

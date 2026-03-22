@@ -650,3 +650,57 @@ def test_dimension_voucher_enrichment_overrides_llm_5000():
     # Primary debit should be the accrual expense account (6300), not salary (5000)
     assert task.fields.get("debitAccountNumber") == "6300"
     assert task.fields.get("creditAccountNumber") == "1720"
+
+
+# ===========================================================================
+# CREATE_TRAVEL_EXPENSE — Spanish (competition run: 3/8, single cost line)
+# ===========================================================================
+def test_travel_expense_es_extracts_separate_cost_items():
+    """Travel expense should extract per diem, flight, and taxi as separate cost items."""
+    prompt = (
+        "Registre un viaje de negocios de 4 días para el empleado Martín Rodríguez "
+        "(martin.rodriguez@example.org), del 2026-03-10 al 2026-03-13. Dieta diaria: "
+        "400 NOK. Billete de avión: 4000 NOK. Taxi: 450 NOK."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_TRAVEL_EXPENSE
+
+    cost_items = task.fields.get("costItems", [])
+    assert len(cost_items) >= 3, f"Expected at least 3 cost items, got {len(cost_items)}: {cost_items}"
+
+    descriptions = [item["description"].lower() for item in cost_items]
+    amounts = {item["description"].lower(): item["amount"] for item in cost_items}
+
+    # Per diem: 4 days × 400 = 1600
+    assert any("per diem" in d or "diem" in d for d in descriptions), f"No per diem item in {descriptions}"
+    per_diem = next(item for item in cost_items if "diem" in item["description"].lower())
+    assert per_diem["amount"] == 1600.0, f"Per diem should be 1600, got {per_diem['amount']}"
+
+    # Flight
+    assert any("flight" in d or "fly" in d for d in descriptions), f"No flight item in {descriptions}"
+    flight = next(item for item in cost_items if "flight" in item["description"].lower() or "fly" in item["description"].lower())
+    assert flight["amount"] == 4000.0
+
+    # Taxi
+    assert any("taxi" in d for d in descriptions), f"No taxi item in {descriptions}"
+    taxi = next(item for item in cost_items if "taxi" in item["description"].lower())
+    assert taxi["amount"] == 450.0
+
+
+def test_travel_expense_nb_extracts_separate_cost_items():
+    """Norwegian travel expense with per diem, flight, hotel, and taxi."""
+    prompt = (
+        "Registrer en forretningsreise på 5 dager for ansatt Kari Nordmann "
+        "(kari.nordmann@example.org), fra 2026-03-15 til 2026-03-19. Daglig diett: "
+        "450 NOK. Flybillett: 3500 NOK. Hotell: 1200 NOK. Taxi: 300 NOK."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_TRAVEL_EXPENSE
+
+    cost_items = task.fields.get("costItems", [])
+    assert len(cost_items) >= 4, f"Expected at least 4 cost items, got {len(cost_items)}: {cost_items}"
+
+    # Per diem: 5 days × 450 = 2250
+    per_diem = next((item for item in cost_items if "diem" in item["description"].lower()), None)
+    assert per_diem is not None, f"No per diem item in {[i['description'] for i in cost_items]}"
+    assert per_diem["amount"] == 2250.0, f"Per diem should be 2250, got {per_diem['amount']}"

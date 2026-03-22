@@ -239,7 +239,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             "date", "amount", "distance", "title", "description", "name",
             "departmentName", "vatType", "vatTypeId", "expenseDate",
             "costDescription", "paymentType", "paymentTypeId",
-            "project", "department",
+            "project", "department", "costItems",
         },
         TaskType.UPDATE_TRAVEL_EXPENSE: {"date", "amount", "distance", "travel_expense_id"},
         TaskType.DELETE_TRAVEL_EXPENSE: {"travel_expense_id"},

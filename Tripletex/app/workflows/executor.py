@@ -2124,25 +2124,52 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 payload["employee"] = {"id": fallback_employee_id}
         response = client.create_resource("travelExpense", _compact_payload(payload))
         expense_id = _extract_id(response)
-        # Add cost as separate request
+        # Add cost lines as separate requests
         if expense_id:
-            cost_payload = _build_travel_cost_payload(expense_id, fields)
-            if cost_payload:
-                # Resolve paymentType if not set
-                if "paymentType" not in cost_payload:
+            # Resolve paymentType once for all cost lines
+            payment_type_id = None
+            try:
+                pt_resp = client.list_resource("travelExpense/paymentType", fields="id,description", count=10)
+                for pt in pt_resp.get("values", []):
+                    if pt.get("id"):
+                        payment_type_id = pt["id"]
+                        break
+            except Exception:
+                pass
+
+            cost_items = fields.get("costItems", [])
+            if cost_items:
+                # Create separate cost line for each item
+                travel_date = fields.get("expenseDate") or fields.get("date") or _today_iso()
+                for idx, item in enumerate(cost_items):
+                    cost_line: Dict[str, Any] = {
+                        "travelExpense": {"id": expense_id},
+                        "date": travel_date,
+                        "amountCurrencyIncVat": float(item["amount"]),
+                        "comments": item.get("description", ""),
+                    }
+                    if payment_type_id:
+                        cost_line["paymentType"] = {"id": payment_type_id}
                     try:
-                        pt_resp = client.list_resource("travelExpense/paymentType", fields="id,description", count=10)
-                        for pt in pt_resp.get("values", []):
-                            if pt.get("id"):
-                                cost_payload["paymentType"] = {"id": pt["id"]}
-                                break
-                    except Exception:
-                        pass
-                try:
-                    cost_response = client.create_resource("travelExpense/cost", cost_payload)
-                    operations.append(OperationResult(name="create-travel-cost", resource_id=_extract_id(cost_response), payload=cost_response))
-                except Exception as exc:
-                    logger.warning("Failed to create travel cost: %s", exc)
+                        cost_resp = client.create_resource("travelExpense/cost", _compact_payload(cost_line))
+                        operations.append(OperationResult(
+                            name="create-travel-cost-{0}".format(idx + 1),
+                            resource_id=_extract_id(cost_resp),
+                            payload=cost_resp,
+                        ))
+                    except Exception as exc:
+                        logger.warning("Failed to create travel cost %d: %s", idx + 1, exc)
+            else:
+                # Fallback: single cost line with total amount
+                cost_payload = _build_travel_cost_payload(expense_id, fields)
+                if cost_payload:
+                    if payment_type_id and "paymentType" not in cost_payload:
+                        cost_payload["paymentType"] = {"id": payment_type_id}
+                    try:
+                        cost_response = client.create_resource("travelExpense/cost", cost_payload)
+                        operations.append(OperationResult(name="create-travel-cost", resource_id=_extract_id(cost_response), payload=cost_response))
+                    except Exception as exc:
+                        logger.warning("Failed to create travel cost: %s", exc)
         operations.append(
             OperationResult(name="create-travel-expense", resource_id=_extract_id(response), payload=response)
         )
