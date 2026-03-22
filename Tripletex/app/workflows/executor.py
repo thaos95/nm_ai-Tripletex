@@ -364,16 +364,21 @@ def _build_dimension_value_payload(dimension_id: int, value_name: str) -> Dict[s
 
 
 def _build_voucher_payload(
+    client: TripletexClient,
     fields: Dict[str, Any],
     description: str,
     account_number: str,
     amount: float,
     dimension_value_id: Optional[int] = None,
-    debit_account_name: str = "",
-    credit_account_name: str = "",
+    credit_account_number: str = "2400",
 ) -> Dict[str, Any]:
+    debit_id = _resolve_account_id(client, account_number)
+    credit_id = _resolve_account_id(client, credit_account_number)
+    debit_ref: Dict[str, Any] = {"id": debit_id} if debit_id else {"number": int(account_number)}
+    credit_ref: Dict[str, Any] = {"id": credit_id} if credit_id else {"number": int(credit_account_number)}
+
     debit_line: Dict[str, Any] = {
-        "account": {"number": int(account_number), "name": debit_account_name or str(account_number)},
+        "account": debit_ref,
         "amount": abs(amount),
         "description": description,
     }
@@ -381,7 +386,7 @@ def _build_voucher_payload(
         debit_line["freeAccountingDimension1"] = {"id": dimension_value_id}
 
     credit_line: Dict[str, Any] = {
-        "account": {"number": 2400, "name": credit_account_name or "2400"},
+        "account": credit_ref,
         "amount": -abs(amount),
         "description": description,
     }
@@ -391,6 +396,52 @@ def _build_voucher_payload(
         "postings": [debit_line, credit_line],
     }
     return _compact_payload(payload)
+
+
+def _resolve_account_id(client: TripletexClient, account_number: str) -> Optional[int]:
+    """Look up a ledger account by number and return its ID."""
+    try:
+        resp = client.list_resource("ledger/account", fields="id,number,name", count=1, number=int(account_number))
+        for item in resp.get("values", []):
+            if item.get("id"):
+                return int(item["id"])
+    except Exception:
+        pass
+    return None
+
+
+def _create_journal_voucher(
+    client: TripletexClient,
+    operations: list,
+    *,
+    debit_account: str,
+    credit_account: str,
+    amount: float,
+    date: str,
+    description: str,
+    operation_name: str = "create-journal-voucher",
+) -> Optional[Dict[str, Any]]:
+    """Create a balanced journal voucher with two postings, using account IDs."""
+    debit_id = _resolve_account_id(client, debit_account)
+    credit_id = _resolve_account_id(client, credit_account)
+
+    debit_ref: Dict[str, Any] = {"id": debit_id} if debit_id else {"number": int(debit_account)}
+    credit_ref: Dict[str, Any] = {"id": credit_id} if credit_id else {"number": int(credit_account)}
+
+    voucher_payload = {
+        "date": date,
+        "description": description,
+        "postings": [
+            {"account": debit_ref, "amount": abs(amount), "description": description},
+            {"account": credit_ref, "amount": -abs(amount), "description": description},
+        ],
+    }
+    logger.info("creating_journal_voucher payload=%s", voucher_payload)
+    response = client.create_resource("ledger/voucher", voucher_payload)
+    operations.append(
+        OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response)
+    )
+    return response
 
 
 def _resolve_customer(
@@ -1398,12 +1449,15 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                         dimension_value_id = val_id
 
             # Step 3: Create voucher linked to dimension value
+            credit_acct = str(credit_account) if credit_account else "2400"
             voucher_payload = _build_voucher_payload(
+                client,
                 fields,
                 description=description,
                 account_number=str(debit_account),
                 amount=amount,
                 dimension_value_id=dimension_value_id,
+                credit_account_number=credit_acct,
             )
             logger.info("creating_dimension_voucher payload=%s", voucher_payload)
             voucher_response = client.create_resource("ledger/voucher", voucher_payload)
@@ -1413,44 +1467,13 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
 
         # Path 2: Simple journal entry (debit/credit accounts, no dimension)
         elif debit_account and credit_account and amount:
-            debit_name = str(debit_account)
-            credit_name = str(credit_account)
-            try:
-                acct_resp = client.list_resource("ledger/account", fields="id,number,name", count=1, number=int(debit_account))
-                for item in acct_resp.get("values", []):
-                    if item.get("name"):
-                        debit_name = item["name"]
-                        break
-            except Exception:
-                pass
-            try:
-                acct_resp = client.list_resource("ledger/account", fields="id,number,name", count=1, number=int(credit_account))
-                for item in acct_resp.get("values", []):
-                    if item.get("name"):
-                        credit_name = item["name"]
-                        break
-            except Exception:
-                pass
-            voucher_payload = _compact_payload({
-                "date": voucher_date,
-                "description": description,
-                "postings": [
-                    {
-                        "account": {"number": int(debit_account), "name": debit_name},
-                        "amount": abs(amount),
-                        "description": description,
-                    },
-                    {
-                        "account": {"number": int(credit_account), "name": credit_name},
-                        "amount": -abs(amount),
-                        "description": description,
-                    },
-                ],
-            })
-            logger.info("creating_journal_entry payload=%s", voucher_payload)
-            voucher_response = client.create_resource("ledger/voucher", voucher_payload)
-            operations.append(
-                OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+            _create_journal_voucher(
+                client, operations,
+                debit_account=str(debit_account),
+                credit_account=str(credit_account),
+                amount=abs(amount),
+                date=voucher_date,
+                description=description,
             )
         else:
             logger.warning(
@@ -1470,6 +1493,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         if employee_spec.get("email"):
             description = "Payroll expense {0}".format(employee_spec["email"])
         voucher_payload = _build_voucher_payload(
+            client,
             fields,
             description=description,
             account_number="5000",
