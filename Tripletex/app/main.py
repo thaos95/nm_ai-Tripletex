@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional
 
@@ -38,6 +39,20 @@ def _verify_api_key(authorization: Optional[str] = Header(default=None)) -> None
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 
+def _log_parsed_task(parsed_task, attempt: int) -> None:
+    """Log full parsed task details for debugging."""
+    LOGGER.info(
+        "PARSED attempt=%d task_type=%s confidence=%.2f fields=%s match_fields=%s related_entities=%s notes=%s",
+        attempt,
+        parsed_task.task_type,
+        parsed_task.confidence,
+        json.dumps(parsed_task.fields, default=str, ensure_ascii=False),
+        json.dumps(parsed_task.match_fields, default=str, ensure_ascii=False),
+        json.dumps(parsed_task.related_entities, default=str, ensure_ascii=False),
+        parsed_task.notes,
+    )
+
+
 def _attempt_solve(
     prompt: str,
     request: SolveRequest,
@@ -47,17 +62,21 @@ def _attempt_solve(
 ) -> Optional[str]:
     """Single solve attempt. Returns None on success, or error description on failure."""
     parsed_task = parse_prompt(prompt, thinking_level=thinking_level)
-    LOGGER.info("attempt=%d thinking=%s parsed task_type=%s confidence=%.2f", attempt, thinking_level, parsed_task.task_type, parsed_task.confidence)
+    _log_parsed_task(parsed_task, attempt)
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
+        LOGGER.warning("attempt=%d task classified as UNSUPPORTED", attempt)
         return "unsupported"
 
     validation = validate_and_normalize_task(parsed_task)
     if validation.blocking_error:
-        LOGGER.warning("attempt=%d validation blocked: %s", attempt, validation.blocking_error)
+        LOGGER.warning("attempt=%d VALIDATION_BLOCKED: %s", attempt, validation.blocking_error)
         return "validation: {0}".format(validation.blocking_error)
 
     parsed_task = validation.parsed_task
+    # Log again after validation (fields may have been normalized)
+    _log_parsed_task(parsed_task, attempt)
+
     plan = build_plan(parsed_task)
 
     client = TripletexClient(
@@ -68,15 +87,23 @@ def _attempt_solve(
     )
     try:
         result = execute_plan(client, plan)
+        op_names = [op.name for op in result.operations]
+        op_ids = [op.resource_id for op in result.operations]
         LOGGER.info(
-            "attempt=%d execution completed task_type=%s operations=%d error=%s",
-            attempt, result.task_type, len(result.operations), result.error,
+            "EXECUTION attempt=%d task_type=%s operations=%s resource_ids=%s error=%s api_calls=%d",
+            attempt, result.task_type, op_names, op_ids, result.error, len(client.operations),
         )
         if result.error:
             return "execution: {0}".format(result.error)
         if len(result.operations) == 0:
             return "execution: zero operations"
         return None  # success
+    except TripletexClientError as exc:
+        LOGGER.error(
+            "EXECUTION_ERROR attempt=%d status=%s path=%s response=%s",
+            attempt, exc.status_code, exc.path, (exc.response_text or "")[:2000],
+        )
+        return "api_error: {0} {1} {2}".format(exc.status_code, exc.path, str(exc)[:200])
     finally:
         client.close()
 
@@ -88,10 +115,10 @@ async def solve(
     transport: Optional[httpx.BaseTransport] = Depends(get_client_transport),
 ) -> SolveResponse:
     LOGGER.info(
-        "Received solve request prompt=%s base_url=%s session_token_present=%s",
-        request.prompt[:80],
+        "SOLVE_START prompt=%s base_url=%s files=%d",
+        request.prompt,
         request.tripletex_credentials.base_url,
-        bool(request.tripletex_credentials.session_token),
+        len(request.files),
     )
 
     try:
@@ -103,16 +130,19 @@ async def solve(
 
         # 3. Retry on failure (a 0-score failure is always worse than retrying)
         if error and error != "unsupported":
-            LOGGER.info("First attempt failed (%s), retrying with high thinking", error)
-            error2 = _attempt_solve(
-                request.prompt, request, transport,
-                attempt=2, thinking_level="high",
-            )
-            if error2:
-                LOGGER.warning("Retry also failed: %s", error2)
+            LOGGER.info("RETRY first_error=%s thinking=high", error)
+            try:
+                error2 = _attempt_solve(
+                    request.prompt, request, transport,
+                    attempt=2, thinking_level="high",
+                )
+                if error2:
+                    LOGGER.warning("RETRY_FAILED: %s", error2)
+            except Exception:
+                LOGGER.exception("RETRY_EXCEPTION")
 
     except Exception:
-        LOGGER.exception("Error during /solve — returning completed anyway")
+        LOGGER.exception("SOLVE_EXCEPTION — returning completed anyway")
 
     return SolveResponse(status="completed")
 

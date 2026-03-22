@@ -976,6 +976,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
     match_fields = dict(plan.parsed_task.match_fields)
     related = dict(plan.parsed_task.related_entities)
     operations = []
+    logger.info("EXECUTE_START task_type=%s fields=%s related=%s", task_type, fields, related)
 
     if task_type == TaskType.CREATE_EMPLOYEE:
         department_id = _resolve_department(client, operations)
@@ -1419,6 +1420,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             expenses = client.list_resource("travelExpense", count=1, fields="id")
             values = expenses.get("values", [])
             if not values:
+                logger.warning("EXECUTE_DONE task_type=%s ops=0 reason=no_travel_expense_found", task_type)
                 return ExecutionResult(task_type=task_type, operations=operations)
             expense_id = values[0]["id"]
             operations.append(OperationResult(name="lookup-travel-expense", resource_id=expense_id, payload=expenses))
@@ -1479,4 +1481,6 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
         operations.append(OperationResult(name="register-payment", resource_id=invoice_id, payload=response))
 
-    return ExecutionResult(task_type=task_type, operations=operations)
+    result = ExecutionResult(task_type=task_type, operations=operations)
+    logger.info("EXECUTE_DONE task_type=%s ops=%d op_names=%s", task_type, len(operations), [o.name for o in operations])
+    return result

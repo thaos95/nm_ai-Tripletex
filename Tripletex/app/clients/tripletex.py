@@ -116,6 +116,10 @@ class TripletexClient:
             kwargs.get("json"),
         )
         if response.is_error:
+            LOGGER.error(
+                "API_ERROR method=%s path=%s status=%s response=%s",
+                method, normalized_path, response.status_code, response.text[:2000],
+            )
             raise TripletexClientError(
                 status_code=response.status_code,
                 method=method,
