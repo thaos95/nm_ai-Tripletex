@@ -205,7 +205,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.CREATE_PROJECT_BILLING: {
             "name", "startDate", "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate",
             "fixedPriceAmountCurrency", "billingPercentage", "hourlyRateCurrency", "amount",
-            "budget",
+            "budget", "budgetAmount",
         },
         TaskType.CREATE_DEPARTMENT: {"name", "departmentNumber", "departmentNames"},
         TaskType.CREATE_ORDER: {"orderDate", "deliveryDate"},
@@ -299,7 +299,9 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             return ValidationResult(normalized, blocking_error="Project billing requires customer reference")
         # Use budget or fixedPriceAmountCurrency as fallback for amount
         if normalized.fields.get("amount") is None:
-            fallback = normalized.fields.get("budget") or normalized.fields.get("fixedPriceAmountCurrency")
+            fallback = (normalized.fields.get("budget")
+                        or normalized.fields.get("budgetAmount")
+                        or normalized.fields.get("fixedPriceAmountCurrency"))
             if fallback is not None:
                 normalized.fields["amount"] = fallback
         normalized.related_entities.setdefault("order", {})

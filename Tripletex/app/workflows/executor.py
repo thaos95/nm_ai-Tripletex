@@ -301,10 +301,15 @@ def _ensure_company_bank_account(client: TripletexClient, spec: Dict[str, str], 
         )
     except TripletexClientError as exc:
         logger.warning(
-            "bank_account_creation_failed payload=%s error=%s",
+            "bank_account_creation_failed payload=%s error=%s — trying company update fallback",
             json.dumps(payload, ensure_ascii=False, default=str),
             str(exc),
         )
+        try:
+            response = _update_company_bank_account(client)
+            operations.append(OperationResult(name="create-company-bank-account", payload={"bankAccount": response}))
+        except TripletexClientError as exc2:
+            logger.warning("bank_account_company_update_also_failed error=%s", str(exc2))
 
 
 # Hardcoded Norwegian test bank account for sandbox environments
@@ -313,18 +318,46 @@ _FALLBACK_BANK_ACCOUNT_NUMBER = "12345678903"
 
 def _force_create_company_bank_account(client: TripletexClient, operations: list) -> None:
     """Create a company bank account unconditionally — used when invoice creation fails due to missing bank account."""
-    payload = {"bankAccountNumber": _FALLBACK_BANK_ACCOUNT_NUMBER}
-    try:
-        response = client.create_resource("company/bankAccount", payload)
-        operations.append(
-            OperationResult(
-                name="auto-create-company-bank-account",
-                payload={"bankAccount": response},
+    # Try multiple approaches since the proxy may not support all endpoints
+    approaches = [
+        # Approach 1: POST /company/bankAccount (standard Tripletex)
+        lambda: client.create_resource("company/bankAccount", {"bankAccountNumber": _FALLBACK_BANK_ACCOUNT_NUMBER}),
+        # Approach 2: PUT /company with bankAccountNumber (update company)
+        lambda: _update_company_bank_account(client),
+    ]
+    for approach in approaches:
+        try:
+            response = approach()
+            operations.append(
+                OperationResult(
+                    name="auto-create-company-bank-account",
+                    payload={"bankAccount": response},
+                )
             )
-        )
-        logger.info("auto_created_company_bank_account response=%s", response)
-    except TripletexClientError as exc:
-        logger.warning("auto_create_bank_account_failed error=%s", str(exc))
+            logger.info("auto_created_company_bank_account response=%s", response)
+            return
+        except TripletexClientError as exc:
+            logger.warning("auto_create_bank_account_attempt_failed error=%s", str(exc))
+            continue
+    logger.warning("auto_create_bank_account_all_approaches_failed")
+
+
+def _update_company_bank_account(client: TripletexClient) -> Dict[str, Any]:
+    """Try to update the company itself with a bank account number."""
+    # First, get the company info
+    company_resp = client.list_resource("company", fields="id,*", count=1)
+    companies = company_resp.get("values", [])
+    if not companies:
+        raise TripletexClientError(message="No company found", status_code=404)
+    company = companies[0]
+    company_id = company.get("id")
+    if not company_id:
+        raise TripletexClientError(message="Company has no ID", status_code=404)
+    # Update with bank account number
+    return client.update_resource("company", int(company_id), {
+        "id": int(company_id),
+        "bankAccountNumber": _FALLBACK_BANK_ACCOUNT_NUMBER,
+    })
 
 
 def _should_retry_invoice_with_minimal_payload(fields: Dict[str, Any], exc: TripletexClientError) -> bool:
@@ -1318,6 +1351,9 @@ def _execute_bank_reconciliation(
         logger.warning("bank_reconciliation: no CSV rows found in prompt")
         return
 
+    # Ensure company bank account exists — payments require it
+    _force_create_company_bank_account(client, operations)
+
     # Fetch all open customer invoices
     today = _today_iso()
     try:
@@ -1820,10 +1856,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             )
             if supplier_id:
                 si_amount = float(supplier_invoice_spec["amount"])
+                today = _today_iso()
                 si_payload: Dict[str, Any] = {
-                    "invoiceDate": fields.get("invoiceDate") or _today_iso(),
-                    "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or _today_iso(),
-                    "supplier": {"id": supplier_id},
+                    "invoiceHeader": {
+                        "invoiceDate": fields.get("invoiceDate") or today,
+                        "vendorId": supplier_id,
+                        "invoiceAmount": si_amount,
+                        "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or today,
+                    },
                     "orderLines": [{"amountInclVat": si_amount, "externalId": "supplier-cost-1"}],
                 }
                 try:
