@@ -59,6 +59,18 @@ def test_create_employee_nn_with_birth_and_start():
 
 
 # ---------------------------------------------------------------------------
+# CREATE_DEPARTMENT — 7/7 success, guard against regression
+# ---------------------------------------------------------------------------
+def test_create_three_departments_fr():
+    prompt = 'Créez trois départements dans Tripletex : "Økonomi", "Lager" et "IT".'
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DEPARTMENT
+    assert task.fields.get("name") is not None
+    assert "Økonomi" in task.fields.get("departmentNames", "")
+    assert "IT" in task.fields.get("departmentNames", "")
+
+
+# ---------------------------------------------------------------------------
 # CREATE_SUPPLIER_INVOICE — supplier invoice needs externalId, vatPercentage
 # ---------------------------------------------------------------------------
 def test_create_supplier_invoice_preserves_vat_and_account():
