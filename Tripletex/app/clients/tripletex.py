@@ -62,7 +62,7 @@ class TripletexClient:
     base_url: str
     session_token: str
     verify_tls: bool = True
-    timeout: float = 20.0
+    timeout: float = 30.0
     transport: Optional[httpx.BaseTransport] = None
     operations: List[Dict[str, Any]] = field(default_factory=list)
 

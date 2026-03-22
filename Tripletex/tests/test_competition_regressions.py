@@ -977,3 +977,31 @@ class TestFindSingleReRaisesAuthErrors:
         client.get = mock_get
         result = client.find_single("customer", {"organizationNumber": "123"})
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# CREATE_TRAVEL_EXPENSE — English receipt posted to department (competition: misclassified as dimension_voucher)
+# ---------------------------------------------------------------------------
+def test_receipt_expense_to_department_is_travel_expense():
+    prompt = (
+        "We need the Whiteboard expense from this receipt posted to department "
+        "Administrasjon. Use the correct expense account and ensure proper VAT treatment.\n\n"
+        "--- Attachment: kvittering_en_05.pdf ---\n"
+        "Receipt / Kvittering\n"
+        "Store: Jernia\n"
+        "Date: 2026-06-16\n"
+        "Item: Whiteboard\n"
+        "Amount: 8 600,00 kr (incl. MVA)\n"
+        "VAT (25%): 1 720,00 kr"
+    )
+    task = _parse_and_validate(prompt)
+    # Must be travel expense, NOT dimension voucher
+    assert task.task_type == TaskType.CREATE_TRAVEL_EXPENSE, (
+        f"Expected CREATE_TRAVEL_EXPENSE but got {task.task_type}"
+    )
+    # Amount from receipt
+    amount = task.fields.get("amount") or 0
+    assert amount > 0, "Should extract amount from receipt"
+    # Department in related entities
+    dept = task.related_entities.get("department", {})
+    assert dept.get("name") == "Administrasjon" or task.fields.get("departmentName") == "Administrasjon"
