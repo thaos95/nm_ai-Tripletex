@@ -1038,43 +1038,72 @@ def _build_reverse_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _reverse_invoice_payment(client: TripletexClient, invoice_id: int, fields: Dict[str, Any], operations: list) -> None:
+def _reverse_invoice_payment(
+    client: TripletexClient,
+    invoice_id: int,
+    fields: Dict[str, Any],
+    operations: list,
+    invoice_data: Optional[Dict[str, Any]] = None,
+) -> None:
+    # Build list of amounts to try: incl VAT, excl VAT, amountOutstanding-derived
+    amounts_to_try = []
     params = _build_reverse_payment_payload(fields)
-    try:
-        response = client._request("PUT", "/invoice/{0}/:payment".format(int(invoice_id)), params=params)
-    except TripletexClientError as exc:
-        classified = classify_tripletex_error(exc)
-        if exc.status_code == 404 and classified.category in {
-            TripletexErrorCategory.NOT_FOUND,
-            TripletexErrorCategory.WRONG_ENDPOINT,
-        }:
-            operations.append(
-                OperationResult(
-                    name="reverse-invoice-payment",
-                    resource_id=invoice_id,
-                    payload={"skipped": True, "reason": "invoice not available for payment reversal"},
-                )
-            )
+    primary_amount = params.get("paidAmount")
+    if primary_amount:
+        amounts_to_try.append(float(primary_amount))
+
+    if invoice_data:
+        # Add alternative amounts from the invoice
+        for key in ("amount", "amountExcludingVatCurrency", "amountOutstanding", "amountOutstandingCurrency"):
+            val = invoice_data.get(key)
+            if val is not None:
+                fval = float(val)
+                if fval > 0 and fval not in amounts_to_try:
+                    amounts_to_try.append(fval)
+        # If amountOutstanding is 0, the payment equals the full invoice amount
+        outstanding = invoice_data.get("amountOutstanding")
+        total = invoice_data.get("amount")
+        if outstanding is not None and total is not None:
+            paid = float(total) - float(outstanding)
+            if paid > 0 and paid not in amounts_to_try:
+                amounts_to_try.insert(0, paid)  # Most likely correct
+
+    logger.info("reverse_payment invoice=%s amounts_to_try=%s", invoice_id, amounts_to_try)
+
+    last_exc = None
+    for amount in amounts_to_try:
+        try_params = dict(params)
+        try_params["paidAmount"] = amount
+        try_params["paidAmountCurrency"] = amount
+        try:
+            response = client._request("PUT", "/invoice/{0}/:payment".format(int(invoice_id)), params=try_params)
+            operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
+            logger.info("reverse_payment_success invoice=%s amount=%s", invoice_id, amount)
             return
-        if is_company_bank_account_missing(exc):
-            request_id = extract_tripletex_request_id(exc)
-            validation_messages = extract_validation_messages(exc)
-            logger.warning(
-                "reverse_payment_missing_bank_account payload=%s requestId=%s validationMessages=%s",
-                json.dumps(params, ensure_ascii=False, default=str),
-                request_id,
-                validation_messages,
-            )
-            raise MissingPrerequisiteError(
-                stage="payment_reversal",
-                task_type=TaskType.REVERSE_PAYMENT,
-                issue="company_bank_account_required",
-                payload=params,
-                request_id=request_id,
-                validation_messages=validation_messages,
-            )
-        raise
-    operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
+        except TripletexClientError as exc:
+            last_exc = exc
+            if is_company_bank_account_missing(exc):
+                # Auto-create bank account and retry this amount
+                _force_create_company_bank_account(client, operations)
+                try:
+                    response = client._request("PUT", "/invoice/{0}/:payment".format(int(invoice_id)), params=try_params)
+                    operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
+                    return
+                except TripletexClientError:
+                    pass
+            if exc.status_code != 404:
+                raise
+            logger.info("reverse_payment_404 invoice=%s amount=%s, trying next", invoice_id, amount)
+
+    # All amounts failed
+    logger.warning("reverse_payment_all_failed invoice=%s amounts=%s", invoice_id, amounts_to_try)
+    operations.append(
+        OperationResult(
+            name="reverse-invoice-payment",
+            resource_id=invoice_id,
+            payload={"skipped": True, "reason": "all payment amounts returned 404"},
+        )
+    )
 
 
 def _parse_csv_from_prompt(raw_prompt: str) -> List[Dict[str, str]]:
@@ -1669,7 +1698,7 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             fields["amount"] = float(invoice_amount)
             logger.info("reverse_payment using invoice amount_incl_vat=%s instead of parsed=%s",
                         invoice_amount, original_amount)
-        _reverse_invoice_payment(client, invoice_id, fields, operations)
+        _reverse_invoice_payment(client, invoice_id, fields, operations, invoice_data=invoice_data)
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
