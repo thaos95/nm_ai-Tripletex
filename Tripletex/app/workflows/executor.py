@@ -263,10 +263,19 @@ def _build_travel_expense_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
     travel_date = fields.get("expenseDate") or fields.get("date") or _today_iso()
     payload["date"] = travel_date
-    if fields.get("title"):
-        payload["title"] = fields["title"]
-    if fields.get("amount") is not None:
-        payload["costs"] = [{"amount": fields["amount"], "date": travel_date}]
+    title = fields.get("title") or fields.get("description") or fields.get("name")
+    if title:
+        payload["title"] = title
+    amount = fields.get("amount")
+    if amount is not None:
+        cost_entry: Dict[str, Any] = {"amount": float(amount), "date": travel_date}
+        cost_description = fields.get("costDescription") or fields.get("description") or title
+        if cost_description:
+            cost_entry["description"] = cost_description
+        vat_type = fields.get("vatType") or fields.get("vatTypeId")
+        if vat_type:
+            cost_entry["vatType"] = {"id": int(vat_type)} if isinstance(vat_type, (int, str)) and str(vat_type).isdigit() else vat_type
+        payload["costs"] = [cost_entry]
     if fields.get("project"):
         payload["project"] = fields["project"]
     if fields.get("department"):
@@ -1351,6 +1360,27 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         )
 
     elif task_type == TaskType.CREATE_TRAVEL_EXPENSE:
+        # Resolve department if specified
+        dept_spec = related.get("department", {})
+        dept_name = dept_spec.get("name") or fields.get("departmentName")
+        if dept_name:
+            try:
+                dept_resp = client.list_resource("department", fields="id,name", count=5, name=dept_name)
+                for dept in dept_resp.get("values", []):
+                    if dept.get("id"):
+                        fields["department"] = {"id": dept["id"]}
+                        break
+            except Exception:
+                pass
+            if "department" not in fields:
+                try:
+                    dept_create = client.create_resource("department", {"name": dept_name})
+                    dept_id = _extract_id(dept_create)
+                    if dept_id:
+                        fields["department"] = {"id": dept_id}
+                        operations.append(OperationResult(name="create-department", resource_id=dept_id, payload=dept_create))
+                except Exception:
+                    pass
         payload = _build_travel_expense_payload(fields)
         employee_spec = related.get("employee")
         if employee_spec:
