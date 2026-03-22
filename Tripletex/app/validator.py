@@ -382,17 +382,25 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         invoice.setdefault("amountExcludingVatCurrency", normalized.fields.get("amount"))
 
     if normalized.task_type == TaskType.CREATE_DIMENSION_VOUCHER:
-        if not normalized.fields.get("dimensionName"):
-            return ValidationResult(normalized, blocking_error="Dimension voucher requires dimension name")
-        if not normalized.fields.get("dimensionValues"):
-            return ValidationResult(normalized, blocking_error="Dimension voucher requires dimension values")
-        if not normalized.fields.get("selectedDimensionValue"):
-            first_value = str(normalized.fields["dimensionValues"]).split("||")[0]
-            normalized.fields["selectedDimensionValue"] = first_value
-        if normalized.fields.get("accountNumber") is None:
-            return ValidationResult(normalized, blocking_error="Dimension voucher requires account number")
-        if normalized.fields.get("amount") is None:
-            return ValidationResult(normalized, blocking_error="Dimension voucher requires amount")
+        has_debit_credit = normalized.fields.get("debitAccountNumber") and normalized.fields.get("creditAccountNumber")
+        has_dimension = normalized.fields.get("dimensionName")
+        if has_dimension:
+            # Full dimension voucher path: needs dimension values + account + amount
+            if not normalized.fields.get("dimensionValues"):
+                return ValidationResult(normalized, blocking_error="Dimension voucher requires dimension values")
+            if not normalized.fields.get("selectedDimensionValue"):
+                first_value = str(normalized.fields["dimensionValues"]).split("||")[0]
+                normalized.fields["selectedDimensionValue"] = first_value
+            if normalized.fields.get("accountNumber") is None:
+                return ValidationResult(normalized, blocking_error="Dimension voucher requires account number")
+            if normalized.fields.get("amount") is None:
+                return ValidationResult(normalized, blocking_error="Dimension voucher requires amount")
+        elif has_debit_credit:
+            # Simple journal entry path: debit/credit accounts + amount
+            if normalized.fields.get("amount") is None:
+                return ValidationResult(normalized, blocking_error="Journal entry requires amount")
+        else:
+            return ValidationResult(normalized, blocking_error="Dimension voucher requires debit/credit accounts or dimension name")
 
     if normalized.task_type == TaskType.CREATE_PAYROLL_VOUCHER:
         if normalized.fields.get("amount") is None:

@@ -59,7 +59,7 @@ Task types and what maps to them:
 - create_credit_note: credit note, kreditnota, refund invoice
 - create_project_billing: bill project, project invoice with fixed price, fastpris
 - create_supplier_invoice: received invoice from vendor/supplier, leverandørfaktura, factura de proveedor, inngående faktura
-- create_dimension_voucher: journal entry, accrual, periodization, month-end closing, year-end adjustment, move costs between accounts, bilagføring, periodisering, månedsavslutning, kontering, Buchung
+- create_dimension_voucher: journal entry, accrual, periodization, month-end closing, year-end adjustment, move costs between accounts, bilagføring, periodisering, månedsavslutning, kontering, Buchung, Monatsabschluss, Rechnungsabgrenzung. IMPORTANT: Always extract debitAccountNumber and creditAccountNumber from the prompt (these are the account numbers to debit and credit). Also extract amount and date.
 - create_payroll_voucher: salary payment, payroll entry, lønnsbilag, lønnskjøring
 - create_travel_expense: travel claim, reiseregning, expense report, Reisekostenabrechnung, despesa, recibo, receipt expense, kvittering, utlegg, coffee meeting expense, meal expense, bokføre kvittering. Use fields: title, description, amount, departmentName, vatType
 - update_travel_expense: modify existing travel expense
@@ -93,6 +93,9 @@ Assistant: {"task_type":"create_invoice","confidence":0.95,"language_hint":"nb",
 
 User: Utfør månedsavslutning for mars 2026. Periodiser forskuddsbetalt kostnad (10150 kr per måned fra konto 1720 til kostnadskonto 6300).
 Assistant: {"task_type":"create_dimension_voucher","confidence":0.95,"language_hint":"nb","fields_json":"{\\"date\\":\\"2026-03-31\\",\\"amount\\":10150.0,\\"description\\":\\"Periodisering forskuddsbetalt kostnad mars 2026\\",\\"debitAccountNumber\\":\\"6300\\",\\"creditAccountNumber\\":\\"1720\\"}","match_fields_json":"{}","related_entities_json":"{}","attachments_required":false,"notes":[]}
+
+User: Führen Sie den Monatsabschluss für März 2026 durch. Buchen Sie die Rechnungsabgrenzung (6150 EUR monatlich von Konto 1720 auf Aufwandskonto 6300).
+Assistant: {"task_type":"create_dimension_voucher","confidence":0.95,"language_hint":"de","fields_json":"{\\"date\\":\\"2026-03-31\\",\\"amount\\":6150.0,\\"description\\":\\"Rechnungsabgrenzung März 2026\\",\\"debitAccountNumber\\":\\"6300\\",\\"creditAccountNumber\\":\\"1720\\"}","match_fields_json":"{}","related_entities_json":"{}","attachments_required":false,"notes":[]}
 
 User: Vi sendte en faktura på 4644 EUR til Stormberg AS (org.nr 917157812) da kursen var 11.51. Registrer fakturaen i Tripletex.
 Assistant: {"task_type":"create_invoice","confidence":0.96,"language_hint":"nb","fields_json":"{\\"invoiceDate\\":\\"2026-03-22\\",\\"invoiceDueDate\\":\\"2026-03-22\\",\\"orderDate\\":\\"2026-03-22\\",\\"deliveryDate\\":\\"2026-03-22\\",\\"amount\\":4644.0,\\"currency\\":\\"EUR\\",\\"exchangeRate\\":11.51}","match_fields_json":"{}","related_entities_json":"{\\"customer\\":{\\"name\\":\\"Stormberg AS\\",\\"organizationNumber\\":\\"917157812\\",\\"isCustomer\\":true},\\"invoice\\":{\\"description\\":\\"Faktura\\",\\"amountExcludingVatCurrency\\":4644.0,\\"currency\\":\\"EUR\\"}}","attachments_required":false,"notes":[]}
