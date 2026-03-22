@@ -217,6 +217,22 @@ def test_project_billing_de():
 
 
 # ---------------------------------------------------------------------------
+# BANK_RECONCILIATION — was classified as UNSUPPORTED
+# ---------------------------------------------------------------------------
+def test_bank_reconciliation_fr_not_unsupported():
+    """Bank reconciliation with CSV attachment was hitting UNSUPPORTED_INTENT_TOKENS."""
+    prompt = (
+        "Rapprochez le releve bancaire (CSV ci-joint) avec les factures ouvertes "
+        "dans Tripletex. Associez les paiements entrants aux factures clients et "
+        "les paiements sortants aux factures fournisseurs. Gerez correctement les "
+        "paiements partiels."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type != TaskType.UNSUPPORTED
+    assert task.task_type == TaskType.BANK_RECONCILIATION
+
+
+# ---------------------------------------------------------------------------
 # REGISTER_PAYMENT — fields must not be dropped
 # ---------------------------------------------------------------------------
 def test_register_payment_preserves_all_fields():

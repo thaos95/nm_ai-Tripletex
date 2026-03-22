@@ -1077,6 +1077,179 @@ def _reverse_invoice_payment(client: TripletexClient, invoice_id: int, fields: D
     operations.append(OperationResult(name="reverse-invoice-payment", resource_id=invoice_id, payload=response))
 
 
+def _parse_csv_from_prompt(raw_prompt: str) -> List[Dict[str, str]]:
+    """Extract CSV rows from the enriched prompt (attachment text appended as '--- Attachment: ... ---')."""
+    import csv as csv_mod
+    import io
+
+    if not raw_prompt:
+        return []
+
+    # Find the attachment section
+    csv_text = ""
+    idx = raw_prompt.find("--- Attachment:")
+    if idx >= 0:
+        lines = raw_prompt[idx:].split("\n")
+        # Skip the "--- Attachment: ... ---" header line
+        csv_lines = [l for l in lines[1:] if l.strip() and not l.startswith("---")]
+        csv_text = "\n".join(csv_lines)
+
+    if not csv_text:
+        return []
+
+    # Try semicolon delimiter first (common in Norwegian CSVs), then comma
+    for delimiter in [";", ","]:
+        try:
+            reader = csv_mod.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+            rows = list(reader)
+            if rows and reader.fieldnames and len(reader.fieldnames) > 1:
+                return rows
+        except Exception:
+            continue
+
+    logger.warning("csv_parse_failed: could not parse CSV from prompt")
+    return []
+
+
+def _execute_bank_reconciliation(
+    client: TripletexClient,
+    fields: Dict[str, Any],
+    related: Dict[str, Any],
+    plan: Any,
+    operations: list,
+) -> None:
+    """Match bank statement rows to open invoices and register payments."""
+    # Parse CSV from the enriched prompt
+    csv_rows = _parse_csv_from_prompt(plan.raw_prompt)
+    logger.info("bank_reconciliation csv_rows=%d", len(csv_rows))
+
+    if not csv_rows:
+        # Try to extract from fields if the LLM put transaction data there
+        logger.warning("bank_reconciliation: no CSV rows found in prompt")
+        return
+
+    # Fetch all open customer invoices
+    today = _today_iso()
+    try:
+        customer_invoices = client.list_resource(
+            "invoice", fields="id,amount,amountOutstanding,customer,invoiceDate,*",
+            count=500, invoiceDateFrom="2020-01-01", invoiceDateTo=today,
+        ).get("values", [])
+    except TripletexClientError:
+        customer_invoices = []
+
+    # Fetch all open supplier invoices
+    try:
+        supplier_invoices = client.list_resource(
+            "incomingInvoice", fields="id,invoiceAmount,supplier,invoiceDate,*",
+            count=500,
+        ).get("values", [])
+    except TripletexClientError:
+        supplier_invoices = []
+
+    logger.info("bank_reconciliation open_customer_invoices=%d open_supplier_invoices=%d",
+                len(customer_invoices), len(supplier_invoices))
+
+    # Process each CSV row
+    for row in csv_rows:
+        # Try common CSV column names
+        amount_str = (
+            row.get("Beløp") or row.get("Amount") or row.get("Montant")
+            or row.get("beløp") or row.get("amount") or row.get("montant")
+            or row.get("Inn") or row.get("Ut") or ""
+        )
+        date_str = (
+            row.get("Dato") or row.get("Date") or row.get("dato")
+            or row.get("date") or row.get("Bokført") or ""
+        )
+        description = (
+            row.get("Beskrivelse") or row.get("Description") or row.get("Tekst")
+            or row.get("beskrivelse") or row.get("description") or row.get("tekst")
+            or ""
+        )
+
+        try:
+            # Handle Norwegian number format (comma as decimal separator)
+            amount = float(amount_str.replace(",", ".").replace(" ", ""))
+        except (ValueError, AttributeError):
+            logger.warning("bank_reconciliation: skipping row, cannot parse amount=%s", amount_str)
+            continue
+
+        payment_date = date_str.strip() if date_str else today
+
+        if amount > 0:
+            # Incoming payment → match against customer invoices
+            matched = None
+            for inv in customer_invoices:
+                inv_amount = inv.get("amount") or inv.get("amountOutstanding")
+                if inv_amount is not None and abs(float(inv_amount) - amount) < 0.01:
+                    matched = inv
+                    break
+            if matched is None:
+                # Try partial match
+                for inv in customer_invoices:
+                    outstanding = inv.get("amountOutstanding")
+                    if outstanding is not None and float(outstanding) > 0:
+                        matched = inv
+                        break
+
+            if matched:
+                invoice_id = int(matched["id"])
+                pay_amount = amount
+                params = {
+                    "paymentDate": payment_date,
+                    "paidAmount": pay_amount,
+                    "paidAmountCurrency": pay_amount,
+                    "paymentTypeId": 6,
+                }
+                try:
+                    resp = client._request("PUT", "/invoice/{0}/:payment".format(invoice_id), params=params)
+                    operations.append(OperationResult(
+                        name="bank-reconcile-customer-payment",
+                        resource_id=invoice_id,
+                        payload=resp,
+                    ))
+                    logger.info("bank_reconcile_customer_payment invoice=%s amount=%s", invoice_id, pay_amount)
+                    # Remove from list to avoid double-matching
+                    customer_invoices = [i for i in customer_invoices if i.get("id") != matched["id"]]
+                except TripletexClientError as exc:
+                    logger.warning("bank_reconcile_customer_payment_failed invoice=%s error=%s", invoice_id, exc)
+            else:
+                logger.warning("bank_reconciliation: no matching customer invoice for amount=%s", amount)
+
+        elif amount < 0:
+            # Outgoing payment → match against supplier invoices
+            pay_amount = abs(amount)
+            matched = None
+            for inv in supplier_invoices:
+                inv_amount = inv.get("invoiceAmount")
+                if inv_amount is not None and abs(float(inv_amount) - pay_amount) < 0.01:
+                    matched = inv
+                    break
+
+            if matched:
+                inv_id = int(matched["id"])
+                # For supplier invoices, use the payment endpoint
+                params = {
+                    "paymentDate": payment_date,
+                    "paidAmount": pay_amount,
+                    "paymentTypeId": 6,
+                }
+                try:
+                    resp = client._request("PUT", "/incomingInvoice/{0}/:payment".format(inv_id), params=params)
+                    operations.append(OperationResult(
+                        name="bank-reconcile-supplier-payment",
+                        resource_id=inv_id,
+                        payload=resp,
+                    ))
+                    logger.info("bank_reconcile_supplier_payment invoice=%s amount=%s", inv_id, pay_amount)
+                    supplier_invoices = [i for i in supplier_invoices if i.get("id") != matched["id"]]
+                except TripletexClientError as exc:
+                    logger.warning("bank_reconcile_supplier_payment_failed invoice=%s error=%s", inv_id, exc)
+            else:
+                logger.warning("bank_reconciliation: no matching supplier invoice for amount=%s", pay_amount)
+
+
 def _create_credit_note(
     client: TripletexClient,
     invoice_id: int,
@@ -1725,6 +1898,9 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             params=payment_params,
         )
         operations.append(OperationResult(name="register-payment", resource_id=invoice_id, payload=response))
+
+    elif task_type == TaskType.BANK_RECONCILIATION:
+        _execute_bank_reconciliation(client, fields, related, plan, operations)
 
     result = ExecutionResult(task_type=task_type, operations=operations)
     logger.info("EXECUTE_DONE task_type=%s ops=%d op_names=%s", task_type, len(operations), [o.name for o in operations])

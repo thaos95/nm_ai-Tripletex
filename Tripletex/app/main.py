@@ -77,7 +77,7 @@ def _attempt_solve(
     # Log again after validation (fields may have been normalized)
     _log_parsed_task(parsed_task, attempt)
 
-    plan = build_plan(parsed_task)
+    plan = build_plan(parsed_task, raw_prompt=prompt)
 
     client = TripletexClient(
         base_url=str(request.tripletex_credentials.base_url),

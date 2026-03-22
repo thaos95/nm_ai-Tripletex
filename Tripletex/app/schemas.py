@@ -36,6 +36,7 @@ class TaskType(str, Enum):
     REVERSE_PAYMENT = "reverse_payment"
     LIST_LEDGER_ACCOUNTS = "list_ledger_accounts"
     LIST_LEDGER_POSTINGS = "list_ledger_postings"
+    BANK_RECONCILIATION = "bank_reconciliation"
     UNSUPPORTED = "unsupported"
 
 
@@ -79,6 +80,7 @@ class ExecutionResult:
 class ExecutionPlan:
     task: Optional[ParsedTask] = None
     steps: List[Any] = dataclass_field(default_factory=list)
+    raw_prompt: str = ""
 
     @property
     def parsed_task(self) -> Optional[ParsedTask]:

@@ -983,11 +983,6 @@ def _classify_intent(lowered: str) -> Optional[str]:
 
 
 UNSUPPORTED_INTENT_TOKENS = [
-    "avstem",
-    "bankutskrift",
-    "bank statement",
-    "reconcil",
-    "bank reconcil",
     "mva-melding",
     "mva melding",
     "a-melding",
@@ -1006,6 +1001,21 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
             language_hint=_language_hint(prompt),
             fields={},
             notes=["Prompt matches unsupported intent pattern."],
+        )
+
+    # Bank reconciliation detection — before general classification
+    bank_recon_tokens = [
+        "avstem", "bankutskrift", "bank statement", "reconcil", "rapprochez",
+        "relevé bancaire", "releve bancaire", "kontoavstemming", "bankavstemming",
+        "bankabstimmung", "conciliación bancaria", "conciliacion bancaria",
+    ]
+    if any(token in lowered for token in bank_recon_tokens):
+        return ParsedTask(
+            task_type=TaskType.BANK_RECONCILIATION,
+            confidence=0.90,
+            language_hint=_language_hint(prompt),
+            fields=_extract_common_fields(prompt),
+            notes=["Bank reconciliation detected."],
         )
 
     action = _detect_action(lowered)

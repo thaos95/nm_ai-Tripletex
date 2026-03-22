@@ -13,6 +13,13 @@ LOGGER = logging.getLogger(__name__)
 
 TASK_KEYWORDS: List[Tuple[str, List[str]]] = [
     # --- specific multi-word patterns first ---
+    ("bank_reconciliation", [
+        "avstem", "bankutskrift", "bank statement", "reconcil",
+        "bank reconcil", "rapprochez", "relevé bancaire", "releve bancaire",
+        "kontoavstemming", "bankavstemming", "bankabstimmung",
+        "conciliación bancaria", "conciliacion bancaria",
+        "reconciliação bancária", "reconciliacao bancaria",
+    ]),
     ("reverse_payment", [
         "reverser betaling", "reverser betalinga", "reverser betalingen",
         "reverse payment", "returned by the bank", "returnert av banken",
@@ -197,11 +204,12 @@ PLAN_STEPS: Dict[str, List[str]] = {
     "reverse_payment": ["resolve-reversal-customer", "resolve-reversal-invoice", "reverse-payment"],
     "list_ledger_accounts": ["list-ledger-accounts"],
     "list_ledger_postings": ["list-ledger-postings"],
+    "bank_reconciliation": ["parse-bank-statement", "match-invoices", "register-payments"],
     "unsupported": [],
 }
 
 
-def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
+def build_plan(parsed_task: ParsedTask, raw_prompt: str = "") -> ExecutionPlan:
     task_type_str = parsed_task.task_type.value if isinstance(parsed_task.task_type, TaskType) else str(parsed_task.task_type)
     step_names = list(PLAN_STEPS.get(task_type_str, []))
 
@@ -216,7 +224,7 @@ def build_plan(parsed_task: ParsedTask) -> ExecutionPlan:
         PlanStep(id=f"step-{i+1}", name=name, action=name, details={})
         for i, name in enumerate(step_names)
     ]
-    return ExecutionPlan(task=parsed_task, steps=steps)
+    return ExecutionPlan(task=parsed_task, steps=steps, raw_prompt=raw_prompt)
 
 
 # ---------------------------------------------------------------------------
