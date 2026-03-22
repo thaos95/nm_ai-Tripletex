@@ -115,6 +115,9 @@ TASK_KEYWORDS: List[Tuple[str, List[str]]] = [
     ("create_employee", [
         "ansatt", "tilsett", "tilsatt", "employee", "empleado",
         "funcionario", "mitarbeiter", "employé", "employe",
+        "nouvel employe", "nouvel employé", "neuer mitarbeiter", "nuevo empleado",
+        "novo funcionario", "ny ansatt", "new employee",
+        "intégration", "integration complete", "onboarding",
     ]),
     ("create_product", [
         "produkt", "produktet", "product", "producto", "produto",

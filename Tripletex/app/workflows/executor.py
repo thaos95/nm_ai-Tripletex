@@ -80,6 +80,11 @@ def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) 
     if spec.get("occupationCode"):
         employment["occupationCode"] = {"code": str(spec["occupationCode"])}
 
+    if spec.get("annualSalary"):
+        employment["annualSalary"] = float(spec["annualSalary"])
+    if spec.get("workingHoursPerDay"):
+        employment["workingHoursScheme"] = "HOURS_7_5"  # default standard hours
+
     payload: Dict[str, Any] = {
         "firstName": spec.get("first_name"),
         "lastName": spec.get("last_name"),

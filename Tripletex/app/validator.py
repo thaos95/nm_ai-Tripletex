@@ -192,10 +192,17 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
 
     _normalize_related_entity_aliases(normalized)
 
+    # Normalize camelCase field names to snake_case equivalents
+    if "firstName" in normalized.fields and "first_name" not in normalized.fields:
+        normalized.fields["first_name"] = normalized.fields.pop("firstName")
+    if "lastName" in normalized.fields and "last_name" not in normalized.fields:
+        normalized.fields["last_name"] = normalized.fields.pop("lastName")
+
     allowed_fields: Dict[TaskType, Set[str]] = {
         TaskType.CREATE_EMPLOYEE: {
             "first_name", "last_name", "email", "employee_type", "birthDate", "dateOfBirth", "startDate", "userType",
             "nationalIdentityNumber", "bankAccountNumber", "employmentPercentage", "annualSalary", "occupationCode",
+            "workingHoursPerDay", "phoneNumberMobile", "address",
         },
         TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
         TaskType.LIST_EMPLOYEES: {"fields", "count"},
@@ -270,8 +277,13 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         pass
 
     if normalized.task_type == TaskType.CREATE_EMPLOYEE:
-        if not normalized.fields.get("first_name") or not normalized.fields.get("email"):
-            return ValidationResult(normalized, blocking_error="Employee creation requires name and email")
+        if not normalized.fields.get("first_name") and not normalized.fields.get("last_name"):
+            return ValidationResult(normalized, blocking_error="Employee creation requires at least a name")
+        # Generate fallback email if missing — Tripletex requires email
+        if not normalized.fields.get("email"):
+            fn = (normalized.fields.get("first_name") or "employee").lower().replace(" ", "")
+            ln = (normalized.fields.get("last_name") or "unknown").lower().replace(" ", "")
+            normalized.fields["email"] = f"{fn}.{ln}@example.org"
 
     if normalized.task_type == TaskType.UPDATE_EMPLOYEE:
         if not normalized.match_fields:

@@ -594,6 +594,8 @@ def _extract_employee_name(prompt: str) -> Tuple[Optional[str], Optional[str]]:
     patterns = [
         r"(?:navn|named|called|chamado|namens|heiter|heter)\s+([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
         r"(?:employee|ansatt|funcion[aá]rio|mitarbeiter|tilsett|employ[ée])(?:\s+med\s+navn)?\s+([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
+        # Attachment/PDF structured fields: "Nom: Arthur Leroy", "Name: ...", "Nombre: ..."
+        r"(?:^|\n)\s*(?:Nom|Name|Nombre|Nome|Navn)\s*:\s*([A-ZÆØÅ][\wÆØÅæøå.\-]+(?:\s+[A-ZÆØÅ][\wÆØÅæøå.\-]+)+)",
     ]
     for pattern in patterns:
         match = re.search(pattern, prompt, re.IGNORECASE)

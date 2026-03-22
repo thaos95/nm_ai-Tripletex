@@ -726,3 +726,28 @@ def test_dimension_voucher_de_mahngebuhr_parses_correctly():
     assert task.fields.get("debitAccountNumber") == "1500"
     assert task.fields.get("creditAccountNumber") == "3400"
     assert task.fields.get("amount") == 60.0
+
+
+# ===========================================================================
+# CREATE_EMPLOYEE — French PDF onboarding (no email in PDF)
+# ===========================================================================
+def test_create_employee_fr_onboarding_no_email():
+    """French employee onboarding should not block when email is missing (generates fallback)."""
+    prompt = (
+        "Vous avez recu une lettre d'offre (voir PDF ci-joint) pour un nouvel employe. "
+        "Effectuez l'integration complete : creez l'employe, attribuez le bon departement, "
+        "configurez les details d'emploi avec le pourcentage et le salaire annuel, "
+        "et configurez les heures de travail standard.\n\n"
+        "--- Attachment: tilbudsbrev_fr_01.pdf ---\n"
+        "Nom: Arthur Leroy\nDate de naissance: 30/05/1999\n"
+        "Département: Drift\nDate de début: 01/01/2026\n"
+        "Salaire annuel: 540 000 NOK\nHeures de travail: 7,5 heures/jour"
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_EMPLOYEE, (
+        f"Expected CREATE_EMPLOYEE, got {task.task_type}"
+    )
+    # Should not be blocked — validator generates fallback email
+    assert task.fields.get("first_name") or task.fields.get("firstName"), "Missing first name"
+    assert task.fields.get("email"), "Should have fallback email"
+    assert "@" in task.fields["email"], f"Invalid email: {task.fields['email']}"
