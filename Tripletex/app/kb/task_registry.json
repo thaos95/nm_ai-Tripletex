@@ -7,19 +7,24 @@
       "lastName": "fields.last_name",
       "email": "fields.email",
       "dateOfBirth": "fields.birthDate|fields.dateOfBirth",
-      "startDate": "fields.startDate|default:today",
-      "userType": "fields.userType|default:STANDARD"
+      "userType": "fields.userType|default:STANDARD",
+      "nationalIdentityNumber": "fields.nationalIdentityNumber",
+      "employments": "[{isActive:true, startDate:fields.startDate|default:today, percentageOfFullTimeEquivalent:fields.employmentPercentage, occupationCode:{code:fields.occupationCode}}]"
     },
     "forbidden_fields": [],
     "allowed_parsed_fields": [
       "first_name", "last_name", "email", "employee_type", "birthDate",
       "dateOfBirth", "startDate", "userType", "phoneNumberMobile",
-      "isAccountAdmin", "address"
+      "isAccountAdmin", "address", "nationalIdentityNumber", "bankAccountNumber",
+      "employmentPercentage", "annualSalary", "occupationCode"
     ],
     "gotchas": [
-      "startDate is required — default to today if not provided",
+      "startDate belongs inside employments array, NOT at the top level — API rejects top-level startDate",
       "dateOfBirth may appear as birthDate in parsed fields",
-      "userType enum: STANDARD, EXTENDED, NO_ACCESS"
+      "userType enum: STANDARD, EXTENDED, NO_ACCESS",
+      "nationalIdentityNumber is a valid top-level field for Norwegian employees",
+      "employmentPercentage maps to percentageOfFullTimeEquivalent inside employments",
+      "occupationCode maps to occupationCode:{code} nested object inside employments"
     ],
     "prerequisites": [],
     "tier": 1

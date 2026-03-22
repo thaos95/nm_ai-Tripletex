@@ -1,7 +1,7 @@
 # Tripletex API Endpoint Reference
 
 ## POST /employee
-Create an employee. Required: firstName, lastName. Optional: email, dateOfBirth, startDate (defaults to today), userType (STANDARD/EXTENDED/NO_ACCESS), department:{id}, phoneNumberMobile. The startDate field is required by Tripletex — always default to today if not provided.
+Create an employee. Required: firstName, lastName. Optional: email, dateOfBirth, userType (STANDARD/EXTENDED/NO_ACCESS), department:{id}, phoneNumberMobile, nationalIdentityNumber. IMPORTANT: startDate belongs inside the employments array, NOT at the top level. Use: employments:[{isActive:true, startDate:"2026-01-01", percentageOfFullTimeEquivalent:100, occupationCode:{code:"3512"}}]. Top-level startDate causes 422 "Feltet eksisterer ikke i objektet".
 
 ## PUT /employee/{id}
 Update an existing employee. Must GET the employee first to find their ID. Common updates: phoneNumberMobile, email.

@@ -797,10 +797,10 @@ def _extract_journal_entries(prompt: str) -> List[Dict[str, Any]]:
             })
             break
 
-    # Single-account accrual pattern: "de la cuenta 1720 a gasto" — only source account, expense account default 6300
+    # Single-account accrual pattern: "de la cuenta 1720 a gasto" / "fra konto 1720 til kostkonto"
     if not entries:
         accrual_single_patterns = [
-            r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:a\s+(?:gasto|kostnad|expense|aufwand|charge|despesa))",
+            r"(?:periodis\w+|accrual|rechnungsabgrenzung|periodificaci[oó]n)\s[^.]*?(\d+(?:[.,]\d+)?)\s*(?:nok|kr|eur)\b[^.]*?(?:konto|cuenta|account|compte)\s+(\d{4})\b[^.]*?(?:(?:a|til)\s+(?:gasto|kostnad\w*|kostkonto|kostnadskonto|utgiftskonto|expense|aufwand\w*|charge|despesa|d[ée]pense))",
         ]
         for pattern in accrual_single_patterns:
             m = re.search(pattern, prompt, re.IGNORECASE | re.DOTALL)
@@ -1780,13 +1780,11 @@ def parse_prompt_rule_based(prompt: str) -> ParsedTask:
 
         # Multi-entry detection for month-end close prompts
         journal_entries = _extract_journal_entries(prompt)
-        if len(journal_entries) >= 2:
+        if journal_entries:
             fields["journalEntries"] = journal_entries
-            # Use first entry as primary debit/credit/amount if not already set
-            if not fields.get("debitAccountNumber"):
-                fields["debitAccountNumber"] = journal_entries[0]["debitAccountNumber"]
-            if not fields.get("creditAccountNumber"):
-                fields["creditAccountNumber"] = journal_entries[0]["creditAccountNumber"]
+            # Always use first regex-extracted entry as primary debit/credit/amount
+            fields["debitAccountNumber"] = journal_entries[0]["debitAccountNumber"]
+            fields["creditAccountNumber"] = journal_entries[0]["creditAccountNumber"]
             if not fields.get("amount"):
                 fields["amount"] = journal_entries[0]["amount"]
 
@@ -1961,12 +1959,13 @@ def _enrich_dimension_voucher(prompt: str, result: ParsedTask) -> ParsedTask:
     if result.fields.get("journalEntries"):
         return result  # already extracted (e.g. by rule-based parser)
     entries = _extract_journal_entries(prompt)
-    if len(entries) >= 2:
+    if entries:
         result.fields["journalEntries"] = entries
-        if not result.fields.get("debitAccountNumber"):
-            result.fields["debitAccountNumber"] = entries[0]["debitAccountNumber"]
-        if not result.fields.get("creditAccountNumber"):
-            result.fields["creditAccountNumber"] = entries[0]["creditAccountNumber"]
+        # ALWAYS override debit/credit with first regex-extracted entry — regex assigns
+        # accounts correctly by prefix (6xxx=expense debit, 1xxx=prepaid credit),
+        # while the LLM often picks the wrong entry (e.g., salary 5000→2900)
+        result.fields["debitAccountNumber"] = entries[0]["debitAccountNumber"]
+        result.fields["creditAccountNumber"] = entries[0]["creditAccountNumber"]
         if not result.fields.get("amount"):
             result.fields["amount"] = entries[0]["amount"]
     return result

@@ -579,3 +579,74 @@ class TestValidatorPreservesFields:
         r = result.parsed_task.related_entities
         assert "activity" in r
         assert "time_entry" in r or "time_entries" in r or "employee" in r
+
+
+# ===========================================================================
+# Validator whitelist tests — employee employment fields
+# ===========================================================================
+class TestValidatorPreservesEmploymentFields:
+    def test_employee_employment_fields_preserved(self):
+        """Validator must preserve nationalIdentityNumber, employmentPercentage, occupationCode."""
+        task = ParsedTask(
+            task_type=TaskType.CREATE_EMPLOYEE,
+            confidence=0.95,
+            fields={
+                "first_name": "Hannah",
+                "last_name": "Clark",
+                "email": "hannah.clark@example.org",
+                "dateOfBirth": "1990-06-27",
+                "startDate": "2026-08-20",
+                "nationalIdentityNumber": "27069086891",
+                "employmentPercentage": 100.0,
+                "annualSalary": 970000.0,
+                "occupationCode": "3512",
+            },
+        )
+        result = validate_and_normalize_task(task)
+        assert result.blocking_error is None
+        f = result.parsed_task.fields
+        assert f["nationalIdentityNumber"] == "27069086891"
+        assert f["employmentPercentage"] == 100.0
+        assert f["occupationCode"] == "3512"
+        assert f["annualSalary"] == 970000.0
+        assert f["startDate"] == "2026-08-20"
+
+
+# ===========================================================================
+# Month-end close — Norwegian single-account accrual ("til kostkonto")
+# ===========================================================================
+def test_dimension_voucher_norwegian_til_kostkonto():
+    prompt = (
+        "Utfør månedsavslutning for mars 2026. Periodiser forskuddsbetalt kostnad "
+        "(11000 kr per måned fra konto 1720 til kostkonto). Bokfør månedlig "
+        "avskrivning for et driftsmiddel med anskaffelseskost 67050 kr og levetid "
+        "5 år (lineær avskrivning til konto 6020). Kontroller at saldobalansen "
+        "går i null. Bokfør også en lønnsavsetning (debet lønnskostnad konto 5000, "
+        "kredit påløpt lønn konto 2900)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER
+    entries = task.fields.get("journalEntries", [])
+    assert len(entries) >= 1, f"Expected at least 1 journal entry, got {len(entries)}"
+    # Accrual entry: credit 1720 (prepaid), debit 6300 (default expense)
+    assert any(e["creditAccountNumber"] == "1720" for e in entries)
+    # Primary debit should NOT be 5000 (system-generated salary account)
+    assert task.fields.get("debitAccountNumber") != "5000"
+
+
+# ===========================================================================
+# Enrichment overrides LLM wrong entry (5000 → 2900)
+# ===========================================================================
+def test_dimension_voucher_enrichment_overrides_llm_5000():
+    prompt = (
+        "Utfør månedsavslutning for mars 2026. Periodiser forskuddsbetalt kostnad "
+        "(10150 kr per måned fra konto 1720 til kostnadskonto 6300). Bokfør månedlig "
+        "avskrivning av et anleggsmiddel med anskaffelseskostnad 72000 kr og levetid "
+        "6 år (lineær avskrivning til konto 6020). Bokfør også en lønnsavsetning "
+        "(debiteringskonto 5000, krediteringskonto 2900)."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER
+    # Primary debit should be the accrual expense account (6300), not salary (5000)
+    assert task.fields.get("debitAccountNumber") == "6300"
+    assert task.fields.get("creditAccountNumber") == "1720"

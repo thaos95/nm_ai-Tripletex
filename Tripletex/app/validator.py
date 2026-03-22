@@ -195,6 +195,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
     allowed_fields: Dict[TaskType, Set[str]] = {
         TaskType.CREATE_EMPLOYEE: {
             "first_name", "last_name", "email", "employee_type", "birthDate", "dateOfBirth", "startDate", "userType",
+            "nationalIdentityNumber", "bankAccountNumber", "employmentPercentage", "annualSalary", "occupationCode",
         },
         TaskType.UPDATE_EMPLOYEE: {"phoneNumberMobile", "email"},
         TaskType.LIST_EMPLOYEES: {"fields", "count"},
@@ -386,6 +387,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
     if normalized.task_type == TaskType.CREATE_DIMENSION_VOUCHER:
         has_debit_credit = normalized.fields.get("debitAccountNumber") and normalized.fields.get("creditAccountNumber")
         has_dimension = normalized.fields.get("dimensionName")
+        has_journal_entries = normalized.fields.get("journalEntries") and len(normalized.fields["journalEntries"]) >= 1
         if has_dimension:
             # Full dimension voucher path: needs dimension values + account + amount
             if not normalized.fields.get("dimensionValues"):
@@ -401,6 +403,14 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
             # Simple journal entry path: debit/credit accounts + amount
             if normalized.fields.get("amount") is None:
                 return ValidationResult(normalized, blocking_error="Journal entry requires amount")
+        elif has_journal_entries:
+            # Multi-entry journal path: journalEntries extracted from parsing
+            if not normalized.fields.get("amount"):
+                normalized.fields["amount"] = normalized.fields["journalEntries"][0].get("amount", 0)
+            if not normalized.fields.get("debitAccountNumber"):
+                normalized.fields["debitAccountNumber"] = normalized.fields["journalEntries"][0].get("debitAccountNumber")
+            if not normalized.fields.get("creditAccountNumber"):
+                normalized.fields["creditAccountNumber"] = normalized.fields["journalEntries"][0].get("creditAccountNumber")
         else:
             return ValidationResult(normalized, blocking_error="Dimension voucher requires debit/credit accounts or dimension name")
 

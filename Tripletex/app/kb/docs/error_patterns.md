@@ -3,6 +3,9 @@
 ## 422 "Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer"
 Invoice requires company bank account. Resolution: Auto-create bank account via POST /company/bankAccount or PUT /company/{id} with bankAccountNumber, then retry invoice creation.
 
+## 422 "startDate: Feltet eksisterer ikke i objektet" on POST /employee
+The startDate field is not valid at the top level of POST /employee. Resolution: Move startDate inside the employments array: employments:[{isActive:true, startDate:"2026-01-01"}]. Other employment details (percentageOfFullTimeEquivalent, occupationCode) also go inside this array.
+
 ## 422 "vatType: Feltet eksisterer ikke i objektet"
 The vatType field is not valid on incomingInvoice orderLines. Resolution: Remove vatType from the orderLines. VAT is derived automatically from the account number.
 

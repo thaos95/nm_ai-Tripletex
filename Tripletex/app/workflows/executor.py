@@ -70,15 +70,26 @@ def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) 
     user_type = spec.get("userType", "STANDARD")
     if isinstance(user_type, int):
         user_type = {1: "STANDARD", 2: "EXTENDED", 3: "NO_ACCESS"}.get(user_type, "STANDARD")
-    payload = {
+
+    # startDate belongs inside employments array, NOT at top level
+    start_date = spec.get("startDate") or _today_iso()
+    employment: Dict[str, Any] = {"isActive": True, "startDate": start_date}
+    if spec.get("employmentPercentage"):
+        employment["percentageOfFullTimeEquivalent"] = float(spec["employmentPercentage"])
+    if spec.get("occupationCode"):
+        employment["occupationCode"] = {"code": str(spec["occupationCode"])}
+
+    payload: Dict[str, Any] = {
         "firstName": spec.get("first_name"),
         "lastName": spec.get("last_name"),
         "email": spec.get("email"),
         "dateOfBirth": spec.get("birthDate") or spec.get("dateOfBirth"),
-        "startDate": spec.get("startDate") or _today_iso(),
         "userType": user_type,
         "department": {"id": department_id} if department_id is not None else None,
+        "employments": [_compact_payload(employment)],
     }
+    if spec.get("nationalIdentityNumber"):
+        payload["nationalIdentityNumber"] = str(spec["nationalIdentityNumber"])
     return _compact_payload(payload)
 
 
