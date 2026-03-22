@@ -208,11 +208,41 @@ def _build_minimal_invoice_payload(
 
 
 def _build_invoice_payment_payload(fields: Dict[str, Any]) -> Dict[str, Any]:
-    paid_amount = fields.get("amountPaidCurrency") or fields.get("paidAmount") or fields.get("amount")
+    # Determine the correct payment amount
+    # paidAmountCurrency = amount in the invoice's currency (e.g., EUR)
+    # paidAmount = amount in NOK (or accounting currency)
+    amount = fields.get("amount")
+    paid_currency = fields.get("paidAmountCurrency") or fields.get("amountPaidCurrency")
+    exchange_rate = fields.get("exchangeRate")
+
+    # Guard against exchange rate being mistakenly placed in amount fields
+    # If paid_currency looks like an exchange rate (small number compared to amount), use amount instead
+    if paid_currency is not None and amount is not None:
+        try:
+            pc = float(paid_currency)
+            am = float(amount)
+            if am > 0 and pc > 0 and pc < am * 0.01:
+                # paid_currency is likely an exchange rate, not an amount
+                logger.warning("payment_amount_fix: paidCurrency=%s looks like exchange rate, using amount=%s", pc, am)
+                paid_currency = amount
+        except (TypeError, ValueError):
+            pass
+
+    if paid_currency is None:
+        paid_currency = amount
+
+    # Calculate NOK amount if we have currency amount and exchange rate
+    paid_nok = paid_currency
+    if exchange_rate and paid_currency:
+        try:
+            paid_nok = float(paid_currency) * float(exchange_rate)
+        except (TypeError, ValueError):
+            pass
+
     payload = {
         "paymentDate": fields.get("paymentDate"),
-        "paidAmount": paid_amount,
-        "paidAmountCurrency": paid_amount,
+        "paidAmount": paid_nok,
+        "paidAmountCurrency": paid_currency,
         "paymentTypeId": fields.get("paymentTypeId", 6),
     }
     return _compact_payload(payload)
@@ -887,6 +917,12 @@ def _resolve_invoice_for_payment_reversal(
 
     invoice = filtered[0] if filtered else None
     invoice_id = invoice.get("id") if invoice else None
+    logger.info(
+        "resolve_invoice matched=%d invoice_id=%s amount=%s desc=%s",
+        len(filtered), invoice_id,
+        _candidate_amount(invoice) if invoice else None,
+        _candidate_description(invoice)[:100] if invoice else None,
+    )
     operations.append(
         OperationResult(
             name="resolve-payment-invoice",
@@ -1511,9 +1547,8 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         if invoice_id is None:
             raise TripletexClientError(message="Register payment requires resolvable invoice")
         fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
-        if fields.get("amountPaidCurrency") is None and fields.get("amount") is not None:
-            fields["amountPaidCurrency"] = fields.get("amount")
         payment_params = _build_invoice_payment_payload(fields)
+        logger.info("register_payment invoice_id=%s params=%s", invoice_id, payment_params)
         response = client._request(
             "PUT",
             "/invoice/{0}/:payment".format(int(invoice_id)),

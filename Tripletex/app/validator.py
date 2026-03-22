@@ -240,6 +240,8 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.REGISTER_PAYMENT: {
             "paymentDate", "invoiceDate", "amount", "amountPaidCurrency",
             "paidAmount", "paidAmountCurrency", "paymentTypeId",
+            "currency", "exchangeRate", "markAsPaid",
+            "invoiceDueDate", "orderDate", "deliveryDate",
         },
         TaskType.LIST_LEDGER_ACCOUNTS: {"fields", "count"},
         TaskType.LIST_LEDGER_POSTINGS: {"fields", "count", "period_hint", "dateFrom", "dateTo"},
