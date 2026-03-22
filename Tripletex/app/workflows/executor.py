@@ -74,7 +74,7 @@ def _build_employee_payload(spec: Dict[str, Any], department_id: Optional[int]) 
 
     # startDate belongs inside employments array, NOT at top level
     start_date = spec.get("startDate") or _today_iso()
-    employment: Dict[str, Any] = {"isActive": True, "startDate": start_date}
+    employment: Dict[str, Any] = {"startDate": start_date}
     if spec.get("employmentPercentage"):
         employment["percentageOfFullTimeEquivalent"] = float(spec["employmentPercentage"])
     if spec.get("occupationCode"):
@@ -210,7 +210,6 @@ def _build_supplier_invoice_fallback_payload(fields: Dict[str, Any], supplier_id
     payload: Dict[str, Any] = {
         "invoiceNumber": fields.get("invoiceNumber"),
         "invoiceDate": fields.get("invoiceDate") or today,
-        "dueDate": fields.get("invoiceDueDate") or fields.get("invoiceDate") or today,
         "supplier": {"id": supplier_id},
         "amountExcludingVat": fields.get("amount"),
         "amountExcludingVatCurrency": fields.get("amount"),
