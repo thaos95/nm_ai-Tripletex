@@ -292,6 +292,7 @@ def _build_travel_cost_payload(expense_id: int, fields: Dict[str, Any]) -> Optio
     payment_type = fields.get("paymentType") or fields.get("paymentTypeId")
     if payment_type and str(payment_type).isdigit():
         cost["paymentType"] = {"id": int(payment_type)}
+    # paymentType is required — will be resolved at creation time if not set
     return _compact_payload(cost)
 
 
@@ -1409,6 +1410,16 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
         if expense_id:
             cost_payload = _build_travel_cost_payload(expense_id, fields)
             if cost_payload:
+                # Resolve paymentType if not set
+                if "paymentType" not in cost_payload:
+                    try:
+                        pt_resp = client.list_resource("travelExpense/paymentType", fields="id,description", count=10)
+                        for pt in pt_resp.get("values", []):
+                            if pt.get("id"):
+                                cost_payload["paymentType"] = {"id": pt["id"]}
+                                break
+                    except Exception:
+                        pass
                 try:
                     cost_response = client.create_resource("travelExpense/cost", cost_payload)
                     operations.append(OperationResult(name="create-travel-cost", resource_id=_extract_id(cost_response), payload=cost_response))
