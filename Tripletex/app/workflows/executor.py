@@ -980,7 +980,8 @@ def _register_invoice_payment(
 ) -> None:
     if invoice_id is None or not fields.get("markAsPaid"):
         return
-    fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
+    if not fields.get("paymentDate"):
+        fields["paymentDate"] = fields.get("invoiceDate") or _today_iso()
     if fields.get("amountPaidCurrency") is None and fields.get("amount") is not None:
         fields["amountPaidCurrency"] = fields.get("amount")
     try:
@@ -2389,7 +2390,8 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             # Must also override paidAmountCurrency — otherwise _build_invoice_payment_payload uses the old value
             fields["paidAmountCurrency"] = incl_vat
             fields["amountPaidCurrency"] = incl_vat
-        fields.setdefault("paymentDate", fields.get("invoiceDate") or _today_iso())
+        if not fields.get("paymentDate"):
+        fields["paymentDate"] = fields.get("invoiceDate") or _today_iso()
         payment_params = _build_invoice_payment_payload(fields)
         logger.info("register_payment invoice_id=%s params=%s", invoice_id, payment_params)
         response = client._request(
