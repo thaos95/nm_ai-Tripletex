@@ -1,0 +1,384 @@
+{
+  "create_employee": {
+    "endpoint": "/employee",
+    "method": "POST",
+    "payload_fields": {
+      "firstName": "fields.first_name",
+      "lastName": "fields.last_name",
+      "email": "fields.email",
+      "dateOfBirth": "fields.birthDate|fields.dateOfBirth",
+      "startDate": "fields.startDate|default:today",
+      "userType": "fields.userType|default:STANDARD"
+    },
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "first_name", "last_name", "email", "employee_type", "birthDate",
+      "dateOfBirth", "startDate", "userType", "phoneNumberMobile",
+      "isAccountAdmin", "address"
+    ],
+    "gotchas": [
+      "startDate is required — default to today if not provided",
+      "dateOfBirth may appear as birthDate in parsed fields",
+      "userType enum: STANDARD, EXTENDED, NO_ACCESS"
+    ],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "update_employee": {
+    "endpoint": "/employee/{id}",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["phoneNumberMobile", "email"],
+    "gotchas": [
+      "Must find existing employee first by email or name"
+    ],
+    "prerequisites": ["employee"],
+    "tier": 1
+  },
+  "list_employees": {
+    "endpoint": "/employee",
+    "method": "GET",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["fields", "count"],
+    "gotchas": [],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "create_customer": {
+    "endpoint": "/customer",
+    "method": "POST",
+    "payload_fields": {
+      "name": "fields.name",
+      "email": "fields.email",
+      "isCustomer": "fields.isCustomer|default:true",
+      "isSupplier": "fields.isSupplier|default:false",
+      "organizationNumber": "fields.organizationNumber",
+      "phoneNumber": "fields.phoneNumber"
+    },
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "name", "email", "isCustomer", "isSupplier", "organizationNumber", "phoneNumber"
+    ],
+    "gotchas": [
+      "isCustomer defaults to true, isSupplier defaults to false",
+      "Supplier registration uses this same endpoint with isSupplier=true"
+    ],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "update_customer": {
+    "endpoint": "/customer/{id}",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["phoneNumber", "email"],
+    "gotchas": [],
+    "prerequisites": ["customer"],
+    "tier": 1
+  },
+  "search_customers": {
+    "endpoint": "/customer",
+    "method": "GET",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["fields", "count"],
+    "gotchas": [],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "create_product": {
+    "endpoint": "/product",
+    "method": "POST",
+    "payload_fields": {
+      "name": "fields.name",
+      "priceExcludingVatCurrency": "fields.priceExcludingVatCurrency",
+      "productNumber": "fields.productNumber"
+    },
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "name", "priceExcludingVatCurrency", "productNumber", "vatPercentage"
+    ],
+    "gotchas": [],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "create_project": {
+    "endpoint": "/project",
+    "method": "POST",
+    "payload_fields": {
+      "name": "fields.name",
+      "startDate": "fields.startDate|default:today"
+    },
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["name", "startDate"],
+    "gotchas": [
+      "Requires customer and projectManager linked by ID",
+      "projectManager must be an existing employee with active employment"
+    ],
+    "prerequisites": ["customer", "project_manager"],
+    "tier": 1
+  },
+  "create_department": {
+    "endpoint": "/department",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["name", "departmentNumber", "departmentNames"],
+    "gotchas": [
+      "Multiple departments may be requested in one prompt — check for departmentNames list"
+    ],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "create_order": {
+    "endpoint": "/order",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["orderDate", "deliveryDate"],
+    "gotchas": [
+      "Requires customer ID and at least one order line (product or description)"
+    ],
+    "prerequisites": ["customer", "product"],
+    "tier": 1
+  },
+  "create_invoice": {
+    "endpoint": "/invoice",
+    "method": "POST",
+    "payload_fields": {
+      "invoiceDate": "fields.invoiceDate|default:today",
+      "invoiceDueDate": "fields.invoiceDueDate|default:today"
+    },
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate",
+      "amount", "accountNumber", "sendByEmail", "markAsPaid",
+      "paymentDate", "amountPaidCurrency", "paymentTypeId",
+      "currency", "exchangeRate"
+    ],
+    "gotchas": [
+      "Requires company bank account — auto-create if missing",
+      "Invoice is created from an order (POST /order first, then POST /invoice with orders:[{id}])",
+      "Payment registration uses PUT /invoice/{id}/:payment (separate call)"
+    ],
+    "prerequisites": ["customer", "order"],
+    "tier": 2
+  },
+  "create_supplier_invoice": {
+    "endpoint": "/incomingInvoice",
+    "method": "POST",
+    "needs_wrapper": "invoiceHeader",
+    "wrapper_fields": {
+      "invoiceDate": "fields.invoiceDate|default:today",
+      "invoiceNumber": "fields.invoiceNumber",
+      "vendorId": "resolved:supplier",
+      "invoiceAmount": "fields.amount",
+      "dueDate": "fields.invoiceDueDate|fields.invoiceDate|default:today"
+    },
+    "order_line_fields": {
+      "amountInclVat": "fields.amount",
+      "externalId": "fields.invoiceNumber|default:line-1",
+      "accountId": "fields.accountNumber"
+    },
+    "forbidden_fields": ["vatType", "vatPercentage", "vatCode", "vatRate"],
+    "allowed_parsed_fields": [
+      "invoiceDate", "invoiceNumber", "amount", "accountNumber", "vatPercentage",
+      "description", "invoiceDescription", "invoiceDueDate",
+      "dueDate", "bankAccountNumber"
+    ],
+    "gotchas": [
+      "orderLines do NOT accept vatType or vatPercentage — VAT is derived from account number",
+      "Must use invoiceHeader wrapper — flat invoiceDate/supplier fields are rejected",
+      "vendorId goes inside invoiceHeader, NOT supplier:{id} at top level",
+      "Endpoint is /incomingInvoice not /supplierInvoice",
+      "accountId in orderLines is the account NUMBER (e.g., 7300), not a resolved ID"
+    ],
+    "prerequisites": ["supplier"],
+    "tier": 2
+  },
+  "create_credit_note": {
+    "endpoint": "/invoice",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate", "amount", "creditNote"
+    ],
+    "gotchas": [
+      "Created by calling POST /invoice/{original_invoice_id}/:createCreditNote",
+      "Must find the original invoice first by customer + description/amount match"
+    ],
+    "prerequisites": ["customer", "invoice"],
+    "tier": 2
+  },
+  "create_project_billing": {
+    "endpoint": "/project + /order + /invoice",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "name", "startDate", "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate",
+      "fixedPriceAmountCurrency", "billingPercentage", "hourlyRateCurrency", "amount",
+      "budget", "budgetAmount"
+    ],
+    "gotchas": [
+      "Multi-step: create project → create activity → register time entries → create supplier invoice → create order → create invoice",
+      "budget and budgetAmount should be used as amount fallback if amount is missing",
+      "Supplier invoice within project billing needs invoiceHeader wrapper with vendorId",
+      "Requires company bank account for final invoice creation",
+      "projectManager must have active employment — fall back to any existing employee"
+    ],
+    "prerequisites": ["customer", "project_manager"],
+    "tier": 3
+  },
+  "create_dimension_voucher": {
+    "endpoint": "/ledger/voucher",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "debitAccountNumber", "creditAccountNumber", "amount", "date",
+      "description", "accountNumber", "dimensionName", "dimensionValue"
+    ],
+    "gotchas": [
+      "Voucher postings must use account ID ({id: N}), NOT account number/name",
+      "Resolve account IDs via GET /ledger/account?number=NNNN",
+      "System-generated accounts reject number-based references"
+    ],
+    "prerequisites": [],
+    "tier": 3
+  },
+  "create_payroll_voucher": {
+    "endpoint": "/ledger/voucher",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "debitAccountNumber", "creditAccountNumber", "amount", "date", "description"
+    ],
+    "gotchas": [
+      "Same as dimension voucher: must resolve account IDs first",
+      "Voucher postings must balance (total debits = total credits)"
+    ],
+    "prerequisites": [],
+    "tier": 2
+  },
+  "create_travel_expense": {
+    "endpoint": "/travelExpense",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "title", "description", "amount", "startDate", "endDate",
+      "travelExpenseDate", "departureDate", "returnDate",
+      "perDiemDomestic", "perDiemAbroad", "mileageAllowance",
+      "departureLocation", "destination"
+    ],
+    "gotchas": [
+      "Requires an employee — resolve or create first",
+      "Cost lines are separate: POST /travelExpense/cost after creating the expense"
+    ],
+    "prerequisites": ["employee"],
+    "tier": 2
+  },
+  "update_travel_expense": {
+    "endpoint": "/travelExpense/{id}",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [],
+    "gotchas": ["Must find existing travel expense first"],
+    "prerequisites": ["travel_expense"],
+    "tier": 2
+  },
+  "delete_travel_expense": {
+    "endpoint": "/travelExpense/{id}",
+    "method": "DELETE",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [],
+    "gotchas": ["Must find existing travel expense first by employee + date/description"],
+    "prerequisites": ["travel_expense"],
+    "tier": 1
+  },
+  "delete_voucher": {
+    "endpoint": "/ledger/voucher/{id}",
+    "method": "DELETE",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [],
+    "gotchas": ["Must find voucher by ID or description first"],
+    "prerequisites": ["voucher"],
+    "tier": 1
+  },
+  "register_payment": {
+    "endpoint": "/invoice/{id}/:payment",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "paymentDate", "amount", "amountPaidCurrency", "paymentTypeId",
+      "exchangeRate", "currency"
+    ],
+    "gotchas": [
+      "Uses PUT /invoice/{id}/:payment with query params (not JSON body)",
+      "paidAmount should be the invoice total INCLUDING VAT, not the parsed amount",
+      "Requires company bank account to exist",
+      "Returns 404 if amount doesn't match — try invoice.amount, amountOutstanding, derived payment"
+    ],
+    "prerequisites": ["customer", "invoice"],
+    "tier": 2
+  },
+  "reverse_payment": {
+    "endpoint": "/invoice/{id}/:payment",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "paymentDate", "amount", "amountPaidCurrency", "paymentTypeId"
+    ],
+    "gotchas": [
+      "Same endpoint as register_payment but with negative paidAmount",
+      "paidAmount should be NEGATIVE and match the original payment amount",
+      "Try multiple amounts if 404: invoice total, excl VAT, outstanding, derived payment",
+      "Requires company bank account"
+    ],
+    "prerequisites": ["customer", "invoice"],
+    "tier": 2
+  },
+  "list_ledger_accounts": {
+    "endpoint": "/ledger/account",
+    "method": "GET",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [],
+    "gotchas": [],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "list_ledger_postings": {
+    "endpoint": "/ledger/posting",
+    "method": "GET",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [],
+    "gotchas": [],
+    "prerequisites": [],
+    "tier": 1
+  },
+  "correct_ledger_errors": {
+    "endpoint": "/ledger/voucher",
+    "method": "POST",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": [
+      "debitAccountNumber", "creditAccountNumber", "amount", "date", "description",
+      "accountNumber"
+    ],
+    "gotchas": [
+      "Parse error descriptions from prompt to identify: wrong account, duplicate voucher, missing VAT, wrong amount",
+      "Create correcting vouchers that reverse the error and post the correct entry",
+      "Must resolve account IDs via GET /ledger/account — never use account numbers directly in postings"
+    ],
+    "prerequisites": [],
+    "tier": 3
+  },
+  "bank_reconciliation": {
+    "endpoint": "/invoice/{id}/:payment",
+    "method": "PUT",
+    "forbidden_fields": [],
+    "allowed_parsed_fields": ["date"],
+    "gotchas": [
+      "Parse CSV from attached file to get transaction rows",
+      "Match positive amounts to customer invoices, negative to supplier invoices",
+      "Requires company bank account to exist — create before registering payments",
+      "GET /incomingInvoice may return 405 on some proxies — handle gracefully",
+      "Payment amounts in CSV may include VAT — match against invoice.amount not amountExcludingVat"
+    ],
+    "prerequisites": [],
+    "tier": 3
+  }
+}

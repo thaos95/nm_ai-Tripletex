@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 from app.schemas import ParsedTask, TaskType
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -250,6 +253,19 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.REVERSE_PAYMENT: {"invoiceDate", "invoiceDueDate", "orderDate", "amount", "paymentDate"},
     }
     warnings.extend(_drop_unknown_fields(normalized, allowed_fields))
+
+    # KB-driven forbidden fields check — catch fields that would cause API errors
+    try:
+        from app.kb import get_forbidden_fields
+        task_type_str = normalized.task_type.value if isinstance(normalized.task_type, TaskType) else str(normalized.task_type)
+        forbidden = get_forbidden_fields(task_type_str)
+        for fb in forbidden:
+            if fb in normalized.fields:
+                _logger.info("kb_removing_forbidden_field task=%s field=%s", task_type_str, fb)
+                del normalized.fields[fb]
+                warnings.append(f"Removed forbidden field '{fb}' for {task_type_str} (would cause API error)")
+    except ImportError:
+        pass
 
     if normalized.task_type == TaskType.CREATE_EMPLOYEE:
         if not normalized.fields.get("first_name") or not normalized.fields.get("email"):

@@ -88,8 +88,9 @@ def test_create_supplier_invoice_preserves_vat_and_account():
 
 def test_supplier_invoice_nb_with_vat_and_account():
     """Supplier invoice with vatPercentage and account number.
-    vatPercentage was being sent as-is to the API which rejects it —
-    must be mapped to vatType ID."""
+    vatPercentage is now removed by the KB forbidden fields check —
+    incomingInvoice orderLines do NOT accept vatType/vatPercentage.
+    VAT is derived from the account number."""
     prompt = (
         "Vi har mottatt faktura INV-2026-8551 fra leverandøren Bergvik AS "
         "(org.nr 989568469) på 14850 kr inklusiv MVA. Beløpet gjelder "
@@ -101,7 +102,8 @@ def test_supplier_invoice_nb_with_vat_and_account():
     assert task.fields.get("invoiceNumber") == "INV-2026-8551"
     assert task.fields.get("amount") == 14850.0
     assert task.fields.get("accountNumber") == "6300"
-    assert task.fields.get("vatPercentage") == 25.0
+    # vatPercentage is now correctly removed by KB forbidden fields check
+    assert task.fields.get("vatPercentage") is None, "vatPercentage should be removed (forbidden for incomingInvoice)"
     assert "supplier" in task.related_entities
     assert task.related_entities["supplier"].get("organizationNumber") == "989568469"
 
@@ -445,7 +447,8 @@ class TestValidatorPreservesFields:
         assert result.blocking_error is None
         f = result.parsed_task.fields
         assert f.get("invoiceNumber") == "LF-2026-042"
-        assert f.get("vatPercentage") == 25.0
+        # vatPercentage is removed by KB forbidden fields check (not valid for incomingInvoice)
+        assert f.get("vatPercentage") is None
 
     def test_project_billing_hourly_rate_preserved(self):
         task = ParsedTask(

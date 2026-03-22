@@ -59,9 +59,14 @@ def _attempt_solve(
     transport: Optional[httpx.BaseTransport],
     attempt: int = 1,
     thinking_level: str = "medium",
+    rag_context: str = "",
 ) -> Optional[str]:
     """Single solve attempt. Returns None on success, or error description on failure."""
-    parsed_task = parse_prompt(prompt, thinking_level=thinking_level)
+    # Enrich prompt with RAG context on retry
+    effective_prompt = prompt
+    if rag_context:
+        effective_prompt = f"{prompt}\n\n[API Context]\n{rag_context}"
+    parsed_task = parse_prompt(effective_prompt, thinking_level=thinking_level)
     _log_parsed_task(parsed_task, attempt)
 
     if parsed_task.task_type == TaskType.UNSUPPORTED:
@@ -138,11 +143,22 @@ async def solve(
 
         # 3. Retry on failure (a 0-score failure is always worse than retrying)
         if error and error != "unsupported":
+            # Query RAG for error-specific context to guide retry
+            rag_context = ""
+            try:
+                from app.kb.rag import query_for_error
+                rag_results = query_for_error("", error[:200], top_k=3)
+                if rag_results:
+                    rag_context = "\n".join(r["content"] for r in rag_results)
+                    LOGGER.info("RAG_CONTEXT for retry: %d results, %d chars", len(rag_results), len(rag_context))
+            except Exception:
+                pass  # RAG is optional — never block retry
             LOGGER.info("RETRY first_error=%s thinking=high", error)
             try:
                 error2 = _attempt_solve(
                     enriched_prompt, request, transport,
                     attempt=2, thinking_level="high",
+                    rag_context=rag_context,
                 )
                 if error2:
                     LOGGER.warning("RETRY_FAILED: %s", error2)
