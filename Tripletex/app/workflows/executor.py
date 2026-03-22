@@ -172,12 +172,18 @@ def _build_incoming_invoice_lines(fields: Dict[str, Any]) -> Optional[list]:
     account_number = fields.get("accountNumber")
     if amount is None:
         return None
-    line: Dict[str, Any] = {"amountInclVat": amount}
+    line: Dict[str, Any] = {
+        "amountInclVat": amount,
+        "externalId": fields.get("invoiceNumber") or "line-1",
+    }
     if account_number is not None:
         line["accountId"] = int(account_number)
     description = fields.get("description") or fields.get("invoiceDescription")
     if description:
         line["description"] = description
+    vat_pct = fields.get("vatPercentage")
+    if vat_pct is not None:
+        line["vatPercentage"] = float(vat_pct)
     return [_compact_payload(line)]
 
 

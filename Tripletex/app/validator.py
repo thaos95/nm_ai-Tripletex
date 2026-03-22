@@ -217,6 +217,7 @@ def validate_and_normalize_task(task: ParsedTask) -> ValidationResult:
         TaskType.CREATE_SUPPLIER_INVOICE: {
             "invoiceDate", "invoiceNumber", "amount", "accountNumber", "vatPercentage",
             "description", "invoiceDescription", "invoiceDueDate",
+            "dueDate", "bankAccountNumber",
         },
         TaskType.CREATE_CREDIT_NOTE: {
             "invoiceDate", "invoiceDueDate", "orderDate", "deliveryDate", "amount", "creditNote",
