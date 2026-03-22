@@ -107,10 +107,11 @@ This agent is built for the NM i AI Tripletex competition. Key scoring rules:
 When a competition run fails, follow this cycle:
 
 1. **User pastes logs** from a failed competition submission.
-2. **Add a regression test first** in `tests/test_competition_regressions.py` using the exact prompt from the logs. Assert the correct task type, that critical fields survive validation, and that related_entities are populated.
-3. **Fix the bug** (parser, validator whitelist, executor payload, etc.).
-4. **Run the regression suite** (`pytest tests/test_competition_regressions.py`) — all tests must pass before pushing.
+2. **Fix the bug** (parser, validator whitelist, executor payload, etc.).
+3. **Add a regression test** in `tests/test_competition_regressions.py` using the exact prompt from the logs.
+4. **Run only the new test** (`pytest tests/test_competition_regressions.py::test_name -v`) — fast iteration.
 5. **Commit and push** to both `origin` and `vercel` remotes.
+6. **Run the full regression suite occasionally** (`pytest tests/test_competition_regressions.py -v`) — not every fix, just periodically to catch regressions. The full suite takes ~2.5 min.
 
 The regression test file has two sections:
 - **Prompt-level tests**: call `parse_prompt()` → `validate_and_normalize_task()` on real competition prompts. No API calls.
