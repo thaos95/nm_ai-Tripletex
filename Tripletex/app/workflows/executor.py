@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from app.clients.tripletex import TripletexClient, TripletexClientError
@@ -468,6 +469,97 @@ def _resolve_account_id(client: TripletexClient, account_number: str) -> Optiona
     return None
 
 
+# System-generated accounts and their preferred alternatives (same account class)
+_SYSTEM_ACCOUNT_ALTERNATIVES: Dict[str, List[str]] = {
+    "1500": ["1530", "1510", "1501"],  # Kundefordringer → Opptjent ikke fakturert inntekt
+    "2400": ["2410", "2401", "2430"],  # Leverandørgjeld
+    "5000": ["5001", "5010", "5020"],  # Lønn → manual salary accounts
+}
+
+
+def _find_usable_account(client: TripletexClient, original: str) -> Optional[str]:
+    """Find a non-system-generated alternative for a known system account."""
+    alternatives = _SYSTEM_ACCOUNT_ALTERNATIVES.get(original, [])
+    for alt in alternatives:
+        alt_id = _resolve_account_id(client, alt)
+        if alt_id is not None:
+            return alt
+    # Fallback: search for any account in the same prefix range (e.g. 15xx for 1500)
+    prefix = original[:2]
+    try:
+        resp = client.list_resource(
+            "ledger/account", fields="id,number,name", count=20,
+            numberFrom=int(prefix + "00"), numberTo=int(prefix + "99"),
+        )
+        for item in resp.get("values", []):
+            num = str(item.get("number", ""))
+            if num != original and item.get("id"):
+                return num
+    except Exception:
+        pass
+    return None
+
+
+def _try_alternative_accounts(
+    client: TripletexClient,
+    operations: list,
+    *,
+    debit_account: str,
+    credit_account: str,
+    amount: float,
+    date: str,
+    description: str,
+    operation_name: str,
+    error_message: str,
+) -> Optional[Dict[str, Any]]:
+    """When a voucher fails due to system-generated accounts, try alternatives."""
+    # Parse which row failed from the error message (row 0 = debit, row 1 = credit)
+    row_match = re.search(r"rad\s+(\d+)", error_message)
+    failed_row = int(row_match.group(1)) if row_match else None
+
+    new_debit = debit_account
+    new_credit = credit_account
+
+    if failed_row == 0 or failed_row is None:
+        alt = _find_usable_account(client, debit_account)
+        if alt:
+            logger.info("system_account_alt debit %s → %s", debit_account, alt)
+            new_debit = alt
+    if failed_row == 1 or failed_row is None:
+        alt = _find_usable_account(client, credit_account)
+        if alt:
+            logger.info("system_account_alt credit %s → %s", credit_account, alt)
+            new_credit = alt
+
+    if new_debit == debit_account and new_credit == credit_account:
+        return None  # No alternatives found
+
+    # Retry with alternative accounts
+    debit_id = _resolve_account_id(client, new_debit)
+    credit_id = _resolve_account_id(client, new_credit)
+    debit_ref: Dict[str, Any] = {"id": debit_id} if debit_id else {"number": int(new_debit)}
+    credit_ref: Dict[str, Any] = {"id": credit_id} if credit_id else {"number": int(new_credit)}
+
+    retry_payload = {
+        "date": date,
+        "description": description,
+        "postings": [
+            {"account": debit_ref, "amount": abs(amount), "description": description},
+            {"account": credit_ref, "amount": -abs(amount), "description": description},
+        ],
+    }
+    logger.info("retrying_journal_voucher_alt payload=%s", retry_payload)
+    try:
+        response = client.create_resource("ledger/voucher", retry_payload)
+    except Exception as retry_exc:
+        logger.warning("journal_voucher_alt_also_failed: %s", retry_exc)
+        return None
+    operations.append(
+        OperationResult(name=operation_name, resource_id=_extract_id(response), payload=response)
+    )
+    return response
+
+
 def _create_journal_voucher(
     client: TripletexClient,
     operations: list,
@@ -499,8 +591,16 @@ def _create_journal_voucher(
         response = client.create_resource("ledger/voucher", voucher_payload)
     except TripletexClientError as exc:
         # Handle "systemgenererte" (system-generated account) errors —
-        # some accounts (e.g., 5000 Lønn) are payroll-managed and reject manual postings
+        # some accounts (e.g., 1500 Kundefordringer, 5000 Lønn) are system-managed
         if "systemgenererte" in str(exc).lower() or "system-generated" in str(exc).lower():
+            # Try alternative accounts before giving up
+            alt = _try_alternative_accounts(
+                client, operations, debit_account=debit_account, credit_account=credit_account,
+                amount=amount, date=date, description=description, operation_name=operation_name,
+                error_message=str(exc),
+            )
+            if alt is not None:
+                return alt
             logger.warning("journal_voucher_system_account debit=%s credit=%s — skipping", debit_account, credit_account)
             operations.append(
                 OperationResult(name=operation_name, payload={"skipped": True, "reason": "system-generated account"})
@@ -1206,8 +1306,6 @@ def _execute_ledger_corrections(
     3. Missing VAT line: create VAT posting
     4. Wrong amount: create correcting entry for the difference
     """
-    import re
-
     raw = plan.raw_prompt or ""
     today = _today_iso()
     # Try to find a date range in the prompt for context

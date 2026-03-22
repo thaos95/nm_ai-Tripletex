@@ -704,3 +704,25 @@ def test_travel_expense_nb_extracts_separate_cost_items():
     per_diem = next((item for item in cost_items if "diem" in item["description"].lower()), None)
     assert per_diem is not None, f"No per diem item in {[i['description'] for i in cost_items]}"
     assert per_diem["amount"] == 2250.0, f"Per diem should be 2250, got {per_diem['amount']}"
+
+
+# ===========================================================================
+# CREATE_DIMENSION_VOUCHER — German reminder fee (Mahngebühr)
+# Account 1500 is system-generated → executor should use alternative
+# ===========================================================================
+def test_dimension_voucher_de_mahngebuhr_parses_correctly():
+    """German reminder fee voucher: debit 1500, credit 3400, amount 60."""
+    prompt = (
+        "Einer Ihrer Kunden hat eine uberfallige Rechnung. Finden Sie die uberfallige "
+        "Rechnung und buchen Sie eine Mahngebuhr von 60 NOK. Soll Forderungen (1500), "
+        "Haben Mahngebuhren (3400). Erstellen Sie außerdem eine Rechnung über die "
+        "Mahngebühr an den Kunden und senden Sie diese. Registrieren Sie zusätzlich "
+        "eine Teilzahlung von 5000 NOK auf der überfälligen Rechnung."
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_DIMENSION_VOUCHER, (
+        f"Expected CREATE_DIMENSION_VOUCHER, got {task.task_type}"
+    )
+    assert task.fields.get("debitAccountNumber") == "1500"
+    assert task.fields.get("creditAccountNumber") == "3400"
+    assert task.fields.get("amount") == 60.0
