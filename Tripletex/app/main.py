@@ -251,8 +251,39 @@ async def solve(
                 error2, _ = _execute(parsed2, enriched_prompt, request, transport)
                 if error2:
                     LOGGER.warning("RETRY_FAILED: %s", error2)
+                else:
+                    return SolveResponse(status="completed")
         except Exception:
             LOGGER.exception("RETRY_EXCEPTION")
+
+        # 6. Final fallback: agent-as-executor
+        #    The hardcoded executor failed twice. Let the agent try from scratch
+        #    with full task context, tools, and API docs.
+        try:
+            from app.agent.loop import agent_execute
+            LOGGER.info("AGENT_EXECUTE_START task_type=%s", parsed.task_type)
+            agent_client = TripletexClient(
+                base_url=str(request.tripletex_credentials.base_url),
+                session_token=request.tripletex_credentials.session_token,
+                verify_tls=settings.verify_tls,
+                transport=transport,
+            )
+            try:
+                agent_result = agent_execute(
+                    client=agent_client,
+                    task_type=str(parsed.task_type.value),
+                    fields=dict(parsed.fields),
+                    related_entities=dict(parsed.related_entities),
+                    original_prompt=enriched_prompt[:2000],
+                )
+                if agent_result is not None:
+                    LOGGER.info("AGENT_EXECUTE_SUCCESS")
+                else:
+                    LOGGER.warning("AGENT_EXECUTE_FAILED")
+            finally:
+                agent_client.close()
+        except Exception:
+            LOGGER.exception("AGENT_EXECUTE_EXCEPTION")
 
     except Exception:
         LOGGER.exception("SOLVE_EXCEPTION — returning completed anyway")

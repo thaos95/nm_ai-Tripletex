@@ -5,10 +5,12 @@ import pytest
 from app.agent.tools import (
     extract_rejected_fields,
     fix_payload_from_error,
+    get_task_spec,
+    resolve_entity,
     search_api_docs,
     get_endpoint_schema,
 )
-from app.clients.tripletex import TripletexClientError
+from app.clients.tripletex import TripletexClient, TripletexClientError
 
 
 class TestExtractRejectedFields:
@@ -209,3 +211,87 @@ class TestResilientCreate:
 
         with pytest.raises(TripletexClientError):
             client.create_resource("employee", {"firstName": "Test"})
+
+
+class TestGetTaskSpec:
+    """Test task spec retrieval from KB."""
+
+    def test_get_employee_spec(self):
+        result = get_task_spec("create_employee")
+        parsed = json.loads(result)
+        assert parsed["endpoint"] == "/employee"
+        assert parsed["method"] == "POST"
+        assert "payload_fields" in parsed
+        assert "gotchas" in parsed
+
+    def test_get_invoice_spec(self):
+        result = get_task_spec("create_invoice")
+        parsed = json.loads(result)
+        assert "/invoice" in parsed["endpoint"]
+
+    def test_get_unknown_spec(self):
+        result = get_task_spec("nonexistent_task")
+        assert "No task spec found" in result
+        assert "create_employee" in result  # lists available tasks
+
+
+class TestResolveEntity:
+    """Test entity resolution tool."""
+
+    def test_resolve_finds_customer(self):
+        client = TripletexClient(
+            base_url="https://example.com/v2",
+            session_token="test",
+        )
+
+        def mock_get(path, params=None, **kwargs):
+            return {"values": [{"id": 42, "name": "Acme Inc", "organizationNumber": "123456789"}]}
+
+        client.get = mock_get
+        result = resolve_entity(client, "customer", {"organizationNumber": "123456789"})
+        parsed = json.loads(result)
+        assert parsed["id"] == 42
+
+    def test_resolve_not_found(self):
+        client = TripletexClient(
+            base_url="https://example.com/v2",
+            session_token="test",
+        )
+
+        def mock_get(path, params=None, **kwargs):
+            return {"values": []}
+
+        client.get = mock_get
+        result = resolve_entity(client, "customer", {"name": "Nonexistent"})
+        parsed = json.loads(result)
+        assert parsed["found"] is False
+
+
+class TestAgentToolParsing:
+    """Test the tool call parser."""
+
+    def test_parse_simple_tool_call(self):
+        from app.agent.loop import _parse_tool_call
+        text = '{"tool": "search_api_docs", "args": {"query": "test"}}'
+        result = _parse_tool_call(text)
+        assert result is not None
+        assert result["tool"] == "search_api_docs"
+
+    def test_parse_tool_call_with_text(self):
+        from app.agent.loop import _parse_tool_call
+        text = 'I will search the docs. {"tool": "get_endpoint_schema", "args": {"endpoint": "/employee"}} done.'
+        result = _parse_tool_call(text)
+        assert result is not None
+        assert result["tool"] == "get_endpoint_schema"
+
+    def test_parse_no_tool_call(self):
+        from app.agent.loop import _parse_tool_call
+        text = "I don't know what to do."
+        result = _parse_tool_call(text)
+        assert result is None
+
+    def test_parse_json_without_tool_key_ignored(self):
+        from app.agent.loop import _parse_tool_call
+        text = '{"name": "test", "value": 123}'
+        result = _parse_tool_call(text)
+        assert result is None

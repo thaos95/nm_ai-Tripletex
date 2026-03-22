@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Endpoint docs loaded once from the KB markdown
 # ---------------------------------------------------------------------------
 _ENDPOINT_DOCS: Optional[str] = None
+_TASK_REGISTRY: Optional[Dict[str, Any]] = None
 
 
 def _load_endpoint_docs() -> str:
@@ -31,6 +32,18 @@ def _load_endpoint_docs() -> str:
     else:
         _ENDPOINT_DOCS = ""
     return _ENDPOINT_DOCS
+
+
+def _load_task_registry() -> Dict[str, Any]:
+    global _TASK_REGISTRY
+    if _TASK_REGISTRY is not None:
+        return _TASK_REGISTRY
+    registry_path = Path(__file__).resolve().parent.parent / "kb" / "task_registry.json"
+    if registry_path.exists():
+        _TASK_REGISTRY = json.loads(registry_path.read_text(encoding="utf-8"))
+    else:
+        _TASK_REGISTRY = {}
+    return _TASK_REGISTRY
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +97,49 @@ def get_endpoint_schema(endpoint: str) -> str:
     if matches:
         return "\n\n".join(matches)
     return "No schema found for endpoint: {0}".format(endpoint)
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_task_spec
+# ---------------------------------------------------------------------------
+def get_task_spec(task_type: str) -> str:
+    """Get the full task specification from the KB registry.
+
+    Returns endpoint, method, payload_fields, prerequisites, gotchas, forbidden_fields.
+    """
+    registry = _load_task_registry()
+    spec = registry.get(task_type)
+    if spec is None:
+        return "No task spec found for: {0}. Available: {1}".format(
+            task_type, ", ".join(sorted(registry.keys()))
+        )
+    return json.dumps(spec, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool: resolve_entity
+# ---------------------------------------------------------------------------
+def resolve_entity(
+    client: TripletexClient,
+    entity_type: str,
+    search_fields: Dict[str, Any],
+) -> str:
+    """Find an existing entity by search fields. Returns the entity or 'not found'.
+
+    entity_type: customer, employee, supplier, department, project, product, activity
+    search_fields: e.g. {"organizationNumber": "123456789"} or {"name": "Acme Inc"}
+    """
+    try:
+        result = client.find_single(entity_type, search_fields)
+        if result:
+            return json.dumps(result, default=str, ensure_ascii=False)[:2000]
+        return json.dumps({"found": False, "entity_type": entity_type, "searched": search_fields})
+    except TripletexClientError as exc:
+        return json.dumps({
+            "error": True,
+            "status_code": exc.status_code,
+            "message": str(exc)[:300],
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -198,34 +254,49 @@ def fix_payload_from_error(
 TOOL_DEFINITIONS = [
     {
         "name": "search_api_docs",
-        "description": "Search Tripletex API documentation and knowledge base. Use to find required fields, payload format, and common errors for an endpoint.",
+        "description": "Search Tripletex API documentation and knowledge base for endpoint info, field requirements, and common errors.",
         "parameters": {
-            "query": {"type": "string", "description": "Search query (e.g. 'POST /employee required fields', '422 vatType error')"},
+            "query": "Search query (e.g. 'POST /employee required fields', '422 vatType error')",
         },
     },
     {
         "name": "get_endpoint_schema",
         "description": "Get full documentation for a specific Tripletex API endpoint.",
         "parameters": {
-            "endpoint": {"type": "string", "description": "Endpoint path (e.g. '/employee', '/invoice', '/travelExpense')"},
+            "endpoint": "Endpoint path (e.g. '/employee', '/invoice', '/travelExpense')",
+        },
+    },
+    {
+        "name": "get_task_spec",
+        "description": "Get the full task specification from the knowledge base: endpoint, method, payload fields, prerequisites, gotchas, forbidden fields.",
+        "parameters": {
+            "task_type": "Task type (e.g. 'create_employee', 'create_invoice', 'register_payment')",
+        },
+    },
+    {
+        "name": "resolve_entity",
+        "description": "Search for an existing entity in Tripletex (customer, employee, supplier, department, project, product). Returns the entity with its ID if found.",
+        "parameters": {
+            "entity_type": "Entity type: customer, employee, supplier, department, project, product, activity",
+            "search_fields": "Search criteria as JSON object, e.g. {\"organizationNumber\": \"123456789\"} or {\"name\": \"Acme Inc\"}",
         },
     },
     {
         "name": "call_api",
-        "description": "Make a Tripletex API call. Returns the response or error details.",
+        "description": "Make a Tripletex API call. Returns the response or error details with validation messages.",
         "parameters": {
-            "method": {"type": "string", "description": "HTTP method: GET, POST, PUT, DELETE"},
-            "path": {"type": "string", "description": "API path (e.g. '/employee', '/ledger/account')"},
-            "payload": {"type": "object", "description": "JSON body for POST/PUT requests (optional)"},
-            "params": {"type": "object", "description": "Query parameters for GET requests (optional)"},
+            "method": "HTTP method: GET, POST, PUT, DELETE",
+            "path": "API path (e.g. '/employee', '/ledger/account', '/invoice/{id}/:payment')",
+            "payload": "(Optional) JSON body for POST/PUT requests",
+            "params": "(Optional) Query parameters",
         },
     },
     {
         "name": "done",
-        "description": "Signal that recovery is complete. Call with the final result.",
+        "description": "Signal that task execution is complete.",
         "parameters": {
-            "success": {"type": "boolean", "description": "Whether the error was resolved"},
-            "result": {"type": "object", "description": "The API response if successful, or error details if failed"},
+            "success": "Whether the task was completed successfully (true/false)",
+            "summary": "Brief description of what was done or why it failed",
         },
     },
 ]
