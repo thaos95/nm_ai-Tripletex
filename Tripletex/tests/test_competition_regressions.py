@@ -360,6 +360,30 @@ def test_month_end_close_nb_multi_voucher():
 
 
 # ---------------------------------------------------------------------------
+# CREATE_CREDIT_NOTE — German, full credit of "Cloud-Speicher" invoice
+# ---------------------------------------------------------------------------
+def test_create_credit_note_de_cloud_speicher():
+    prompt = (
+        'Der Kunde Eichenhof GmbH (Org.-Nr. 820205790) hat die Rechnung für '
+        '"Cloud-Speicher" (44400 NOK ohne MwSt.) reklamiert. Erstellen Sie eine '
+        'vollständige Gutschrift, die die gesamte Rechnung storniert.'
+    )
+    task = _parse_and_validate(prompt)
+    assert task.task_type == TaskType.CREATE_CREDIT_NOTE
+    assert task.fields.get("creditNote") is True
+    # Amount should be negative (credit)
+    assert task.fields.get("amount") is not None
+    assert float(task.fields["amount"]) < 0
+    # Customer info preserved
+    customer = task.related_entities.get("customer", {})
+    assert customer.get("name") == "Eichenhof GmbH"
+    assert customer.get("organizationNumber") == "820205790"
+    # Invoice description preserved
+    invoice = task.related_entities.get("invoice", {})
+    assert invoice.get("description") == "Cloud-Speicher" or invoice.get("amountExcludingVatCurrency") == 44400.0
+
+
+# ---------------------------------------------------------------------------
 # CREATE_CUSTOMER — German supplier registration (competition: 6/6)
 # ---------------------------------------------------------------------------
 def test_create_customer_de_supplier():

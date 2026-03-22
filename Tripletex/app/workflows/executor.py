@@ -1491,11 +1491,25 @@ def _create_credit_note(
     client: TripletexClient,
     invoice_id: int,
     operations: list,
+    credit_date: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # Determine date: explicit > resolved invoice date > today
+    if not credit_date:
+        for op in operations:
+            inv = op.payload.get("invoice") if isinstance(op.payload, dict) else None
+            if isinstance(inv, dict) and inv.get("invoiceDate"):
+                credit_date = inv["invoiceDate"]
+                break
+    if not credit_date:
+        credit_date = _today_iso()
+    try:
+        credit_date = datetime.fromisoformat(str(credit_date)).date().isoformat()
+    except (ValueError, TypeError):
+        credit_date = _today_iso()
     response = client._request(
         "PUT",
         "/invoice/{0}/:createCreditNote".format(invoice_id),
-        params={"date": datetime.fromisoformat(operations[0].payload.get("invoice", {}).get("invoiceDate", _today_iso())).date().isoformat()},
+        params={"date": credit_date},
     )
     operations.append(OperationResult(name="create-credit-note", resource_id=invoice_id, payload=response))
     return response
@@ -1748,6 +1762,14 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
 
     elif task_type == TaskType.CREATE_CREDIT_NOTE:
         customer_spec = related.get("customer", {})
+        product_spec = dict(related.get("product", {}))
+        invoice_spec = dict(related.get("invoice", {}))
+        order_spec = dict(related.get("order", {}))
+        # Use invoice/order description as product description for order creation
+        if invoice_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = invoice_spec["description"]
+        if order_spec.get("description") and "description" not in product_spec:
+            product_spec["description"] = order_spec["description"]
         customer_id = _resolve_customer(
             client,
             customer_spec,
@@ -1758,8 +1780,42 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
             raise TripletexClientError(message="Credit note requires resolvable customer")
         invoice_id = _resolve_credit_note_invoice(client, customer_id, fields, related, operations)
         if invoice_id is None:
+            # No existing invoice found — create order → invoice → then credit it
+            logger.info("credit_note_no_existing_invoice — creating order+invoice first")
+            # Use positive amount for the invoice
+            credit_fields = dict(fields)
+            if credit_fields.get("amount") is not None:
+                credit_fields["amount"] = abs(float(credit_fields["amount"]))
+            # Copy invoice amount fields
+            if invoice_spec.get("amountExcludingVatCurrency") is not None:
+                credit_fields.setdefault("priceExcludingVatCurrency", float(invoice_spec["amountExcludingVatCurrency"]))
+            product_id = (
+                _resolve_product(client, product_spec, operations, allow_create=False)
+                if _should_resolve_product_for_order_line(product_spec)
+                else None
+            )
+            order_id = _create_order(
+                client,
+                customer_id,
+                product_id,
+                credit_fields,
+                product_spec,
+                operations,
+            )
+            invoice_response = _create_invoice_with_fallback(
+                client,
+                credit_fields,
+                customer_id,
+                order_id,
+                operations,
+                related=related,
+                task_type=task_type,
+                operation_name="create-credit-source-invoice",
+            )
+            invoice_id = _extract_id(invoice_response)
+        if invoice_id is None:
             raise TripletexClientError(message="Credit note requires resolvable invoice")
-        _create_credit_note(client, invoice_id, operations)
+        _create_credit_note(client, invoice_id, operations, credit_date=fields.get("invoiceDate"))
 
     elif task_type == TaskType.CREATE_PROJECT_BILLING:
         payload = _build_project_payload(fields)
