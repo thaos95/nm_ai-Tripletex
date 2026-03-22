@@ -1314,40 +1314,10 @@ def execute_plan(client: TripletexClient, plan: ExecutionPlan) -> ExecutionResul
                 OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
             )
         else:
-            # Dimension-based voucher flow
-            selected_value_id = None
-            value_names = [value for value in str(fields.get("dimensionValues", "")).split("||") if value]
-            selected_value_name = str(fields.get("selectedDimensionValue") or "")
-            dim_name = fields.get("dimensionName") or description
-            dimension_response = client.create_resource(
-                "ledger/accountingDimensionName",
-                _compact_payload({"dimensionName": dim_name}),
-            )
-            dimension_id = _extract_id(dimension_response)
-            operations.append(
-                OperationResult(name="create-dimension", resource_id=dimension_id, payload=dimension_response)
-            )
-            for value_name in value_names:
-                value_response = client.create_resource(
-                    "ledger/accountingDimensionValue",
-                    _build_dimension_value_payload(int(dimension_id), value_name),
-                )
-                value_id = _extract_id(value_response)
-                operations.append(
-                    OperationResult(name="create-dimension-value", resource_id=value_id, payload=value_response)
-                )
-                if value_name == selected_value_name:
-                    selected_value_id = value_id
-            voucher_payload = _build_voucher_payload(
-                fields,
-                description=description,
-                account_number=str(debit_account or "9999"),
-                amount=amount,
-                dimension_value_id=selected_value_id,
-            )
-            voucher_response = client.create_resource("ledger/voucher", voucher_payload)
-            operations.append(
-                OperationResult(name="create-dimension-voucher", resource_id=_extract_id(voucher_response), payload=voucher_response)
+            # Not enough data to create a meaningful voucher — skip
+            logger.warning(
+                "dimension_voucher_skipped: missing debit=%s credit=%s amount=%s",
+                debit_account, credit_account, amount,
             )
 
     elif task_type == TaskType.CREATE_PAYROLL_VOUCHER:
